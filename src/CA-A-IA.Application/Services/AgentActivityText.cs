@@ -34,6 +34,7 @@ public static class AgentActivityText
             "UiOpenUrl" => $"Abriendo {Tail(Args(args, "url"), 60)}…",
             "UiActiveWindow" => "Mirando qué ventana está al frente…",
             "UiWaitWindow" => $"Esperando '{Args(args, "text")}'…",
+            "UiScreenshot" => "Mirando la pantalla…",
             _ => $"Ejecutando {toolId}…",
         };
     }

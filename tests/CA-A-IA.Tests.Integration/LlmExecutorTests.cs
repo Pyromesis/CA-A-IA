@@ -42,7 +42,8 @@ public sealed class LlmExecutorTests : IDisposable
     private sealed record Harness(
         LlmTaskExecutor Executor, ScriptedLlmProvider Provider, IAgentSessionStore Sessions);
 
-    private Harness Create(IUserConfirmation confirmation, bool confirmWrites, IEventBus? events = null)
+    private Harness Create(IUserConfirmation confirmation, bool confirmWrites, IEventBus? events = null,
+        Action<ToolRegistry>? extraTools = null)
     {
         var dataOptions = Options.Create(new CaAIAOptions
         {
@@ -59,6 +60,7 @@ public sealed class LlmExecutorTests : IDisposable
         tools.Register(new ReadFileTool());
         tools.Register(new ListDirectoryTool());
         tools.Register(new WriteFileTool());
+        extraTools?.Invoke(tools);
 
         var options = Options.Create(new CaAIAOptions
         {
@@ -241,7 +243,8 @@ public sealed class LlmExecutorTests : IDisposable
         public string Id => "fake-llm";
         public string DisplayName => "fake-llm";
         public ProviderCapabilities Capabilities =>
-            ProviderCapabilities.Streaming | ProviderCapabilities.Tools | ProviderCapabilities.StructuredOutput;
+            ProviderCapabilities.Streaming | ProviderCapabilities.Tools | ProviderCapabilities.StructuredOutput
+            | ProviderCapabilities.Vision;
 
         public Task<AIResponse> CompleteAsync(AIRequest request, CancellationToken ct)
         {

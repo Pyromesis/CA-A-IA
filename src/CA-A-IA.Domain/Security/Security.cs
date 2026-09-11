@@ -49,11 +49,13 @@ public sealed record ExecutionScope(
             RequireConfirmationForWrite: false,
             RequireConfirmationForExecute: false),
 
-        // Nivel 1 (y desconocido → lo más seguro): todo cambio con confirmación.
+        // Nivel 1 (y desconocido → lo más seguro): todo cambio con confirmación,
+        // incluido el control del PC (ratón/teclado de Autonomía: cada acción pregunta).
         _ => new ExecutionScope(
             AllowedPaths: new[] { workspacePath },
             DeniedPaths: deniedPaths,
             GrantedPermissions: ToolPermission.Read | ToolPermission.Write | ToolPermission.Execute
+                | ToolPermission.ProcessControl
                 | (allowPackageInstall ? ToolPermission.PackageInstall : ToolPermission.None),
             RequireConfirmationForWrite: true,
             RequireConfirmationForExecute: true),

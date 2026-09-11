@@ -112,6 +112,8 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         };
 
         var maxIterations = Math.Max(1, _options.Agent.MaxToolIterations);
+        var carryImages = new List<string>();
+        var canSee = SupportsVision(provider);
         for (var iteration = 1; iteration <= maxIterations; iteration++)
         {
             ct.ThrowIfCancellationRequested();
@@ -121,13 +123,14 @@ public sealed class LlmTaskExecutor : ITaskExecutor
                 response = await provider.CompleteAsync(new AIRequest
                 {
                     ModelId = _selection.ModelId,
-                    Messages = history,
+                    Messages = WithImages(history, carryImages),
                     Tools = tools.ToList(),
                     Temperature = 0.2,
                     ReasoningEffort = _selection.ReasoningEffort,
                     Timeout = TimeSpan.FromSeconds(_options.Providers.RequestTimeoutSeconds),
                     Correlation = correlation,
                 }, ct).ConfigureAwait(false);
+                carryImages.Clear();
             }
             catch (AIProviderException ex)
             {
@@ -146,6 +149,21 @@ public sealed class LlmTaskExecutor : ITaskExecutor
             {
                 ct.ThrowIfCancellationRequested();
                 var result = await InvokeToolAsync(call, tools, scope, correlation, ct).ConfigureAwait(false);
+                if (canSee && result.Success && result.AttachmentPath is { } shot
+                    && carryImages.Count < 2 && !carryImages.Contains(shot, StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        if (File.Exists(shot))
+                        {
+                            carryImages.Add(shot);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
                 history.Add(new AIMessage(AIRole.Tool,
                     result.Success ? result.Output : $"ERROR [{result.FailureCategory}]: {result.Error}",
                     ToolCallId: call.Id));
@@ -154,6 +172,27 @@ public sealed class LlmTaskExecutor : ITaskExecutor
 
         return new TaskExecutionOutcome(false,
             $"Task did not finish within {maxIterations} tool iterations.", FailureCategory.ToolFailure);
+    }
+
+    /// <summary>
+    /// ¿Acepta imágenes este proveedor? Flag Vision o OpenCode (sus modelos
+    /// server-side suelen ver; el servidor ignora lo que no entienda).
+    /// </summary>
+    private static bool SupportsVision(Domain.AI.IAIProvider provider) =>
+        provider.Capabilities.HasFlag(Domain.AI.ProviderCapabilities.Vision)
+        || string.Equals(provider.Id, "opencode", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Adjunta las capturas pendientes al último mensaje (sin mutar el historial).</summary>
+    private static IReadOnlyList<AIMessage> WithImages(List<AIMessage> history, List<string> carry)
+    {
+        if (carry.Count == 0 || history.Count == 0)
+        {
+            return history;
+        }
+
+        var copy = history.ToList();
+        copy[^1] = history[^1] with { Images = carry.ToList() };
+        return copy;
     }
 
     private async Task<ToolResult> InvokeToolAsync(
@@ -280,6 +319,10 @@ public sealed class LlmTaskExecutor : ITaskExecutor
               UiWaitWindow waits for something to appear instead of guessing timing.
               - After acting, VERIFY with UiActiveWindow: if the wrong app opened, close
               it (Alt+F4 via UiPressKey) and correct course instead of piling clicks.
+              - Your eyes: UiScreenshot captures the screen and the image is attached to
+              your next message automatically (vision-capable model required). Screenshot
+              after navigating or clicking something important, LOOK at it, and only then
+              decide coordinates. Never click blind twice on the same guess.
               - Files you create go inside the workspace with absolute paths.
               """
             : string.Empty;

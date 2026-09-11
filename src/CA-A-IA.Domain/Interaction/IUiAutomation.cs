@@ -35,6 +35,11 @@ public interface IUiAutomation
 
     /// <summary>Ventana en primer plano ahora mismo (ojos del agente).</summary>
     ActiveWindow GetActiveWindow();
+    /// <summary>
+    /// Captura el monitor principal (reducida, PNG) en la carpeta indicada.
+    /// Devuelve la ruta. Rápida (~100-300 ms) para ver casi en tiempo real.
+    /// </summary>
+    Task<string> CaptureScreenshotAsync(string directory, CancellationToken cancellationToken);
 
     /// <summary>Espera hasta que el primer plano contenga el texto (proceso o
     /// título) o se acabe el tiempo. Para sincronizar en vez de adivinar.</summary>

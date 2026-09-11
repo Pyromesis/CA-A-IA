@@ -37,7 +37,8 @@ public sealed record ToolResult(
     bool PermissionDenied = false,
     FailureCategory? FailureCategory = null,
     string? Error = null,
-    TimeSpan? Duration = null);
+    TimeSpan? Duration = null,
+    string? AttachmentPath = null);
 
 /// <summary>
 /// Contrato de herramienta del agente (§14). Implementaciones en Infrastructure;

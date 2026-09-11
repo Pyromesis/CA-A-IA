@@ -16,7 +16,7 @@ public sealed class GetScreenSizeTool : ITool
     public const string ToolId = "UiGetScreen";
     public ToolDefinition Definition { get; } = new(
         ToolId, "UiGetScreen", "Gets the primary monitor size (bounds for mouse coordinates). No arguments.",
-        ToolKind.UiAutomation, ToolPermission.ProcessControl,
+        ToolKind.UiAutomation, ToolPermission.Read,
         Array.Empty<ToolParameter>(), TimeSpan.FromSeconds(10));
 
     private readonly IUiAutomation _ui;
@@ -227,6 +227,48 @@ public sealed class TypeTextTool : ITool
     }
 }
 
+/// <summary>
+/// Captura la pantalla (reducida, PNG) para VER en casi tiempo real.
+/// Sin argumentos. La imagen se adjunta sola al siguiente mensaje al modelo
+/// (requiere modelo con visión); el Output trae la ruta.
+/// </summary>
+public sealed class ScreenshotTool : ITool
+{
+    public const string ToolId = "UiScreenshot";
+    public ToolDefinition Definition { get; } = new(
+        ToolId, "UiScreenshot", "Captures the screen (downscaled PNG) so you can SEE. Use it to verify clicks and read what is on screen. No arguments.",
+        ToolKind.UiAutomation, ToolPermission.Read,
+        Array.Empty<ToolParameter>(), TimeSpan.FromSeconds(30));
+
+    private readonly IUiAutomation _ui;
+    public ScreenshotTool(IUiAutomation ui) => _ui = ui;
+
+    public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "CA-A-IA-autonomy",
+                invocation.Correlation.SessionId.ToString("N"));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(invocation.TimeoutOverride ?? Definition.DefaultTimeout);
+            var path = await _ui.CaptureScreenshotAsync(dir, timeout.Token).ConfigureAwait(false);
+            return WriteFileTool.Ok(invocation, $"Screenshot: {path}.", sw) with
+            {
+                AttachmentPath = path,
+            };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return WriteFileTool.Fail(invocation, "UiScreenshot timed out.", sw);
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return WriteFileTool.Fail(invocation, ex.Message, sw);
+        }
+    }
+}
+
 /// <summary>Abre una app por nombre (o la trae al frente si ya corre). { "name" }.</summary>
 public sealed class OpenAppTool : ITool
 {
@@ -317,7 +359,7 @@ public sealed class GetActiveWindowTool : ITool
     public const string ToolId = "UiActiveWindow";
     public ToolDefinition Definition { get; } = new(
         ToolId, "UiActiveWindow", "Gets the foreground window (process + title) to verify what is open.",
-        ToolKind.UiAutomation, ToolPermission.ProcessControl,
+        ToolKind.UiAutomation, ToolPermission.Read,
         Array.Empty<ToolParameter>(), TimeSpan.FromSeconds(10));
 
     private readonly IUiAutomation _ui;
@@ -348,7 +390,7 @@ public sealed class WaitForActiveWindowTool : ITool
     public const string ToolId = "UiWaitWindow";
     public ToolDefinition Definition { get; } = new(
         ToolId, "UiWaitWindow", "Waits until the foreground window contains text (process or title) instead of guessing blindly.",
-        ToolKind.UiAutomation, ToolPermission.ProcessControl,
+        ToolKind.UiAutomation, ToolPermission.Read,
         new[]
         {
             new ToolParameter("text", "Text to wait for.", "string", IsRequired: true),

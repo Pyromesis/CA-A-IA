@@ -139,7 +139,8 @@ public sealed class OpenCodeServerClient
     /// </summary>
     public async Task<OpenCodeAnswer> PromptAsync(
         string sessionId, string text, string? providerId, string? modelId,
-        string? directory, TimeSpan timeout, CancellationToken ct, string? variant = null)
+        string? directory, TimeSpan timeout, CancellationToken ct, string? variant = null,
+        IReadOnlyList<string>? imagePaths = null)
     {
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms))
@@ -151,6 +152,44 @@ public sealed class OpenCodeServerClient
             w.WriteString("type", "text");
             w.WriteString("text", text);
             w.WriteEndObject();
+            // Adjuntos de visión: FilePart {type:"file", mime, url} (requiere modelo con visión).
+            if (imagePaths is not null)
+            {
+                foreach (var path in imagePaths.Take(4))
+                {
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(path))
+                        {
+                            continue;
+                        }
+
+                        var info = new FileInfo(path);
+                        if (!info.Exists || info.Length is <= 0 or > 6 * 1024 * 1024)
+                        {
+                            continue;
+                        }
+
+                        w.WriteStartObject();
+                        w.WriteString("type", "file");
+                        w.WriteString("mime", Path.GetExtension(path).ToLowerInvariant() switch
+                        {
+                            ".jpg" or ".jpeg" => "image/jpeg",
+                            ".webp" => "image/webp",
+                            ".gif" => "image/gif",
+                            _ => "image/png",
+                        });
+                        w.WriteString("url", path);
+                        w.WriteString("filename", info.Name);
+                        w.WriteEndObject();
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.LogDebug(ex, "Skipping unreadable image {Path}", path);
+                    }
+                }
+            }
+
             w.WriteEndArray();
             if (providerId is not null && modelId is not null)
             {

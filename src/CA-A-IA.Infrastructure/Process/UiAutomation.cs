@@ -402,6 +402,39 @@ public sealed class UiAutomation : IUiAutomation
         }
     }
 
+    /// <summary>Máximo de ancho de captura: suficiente para leer, barato de enviar.</summary>
+    internal const int MaxScreenshotWidth = 1280;
+
+    public Task<string> CaptureScreenshotAsync(string directory, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new ArgumentException("Directory is required.", nameof(directory));
+        }
+
+        ct.ThrowIfCancellationRequested();
+        return Task.Run(() =>
+        {
+            var screen = GetScreenSize();
+            using var full = new System.Drawing.Bitmap(screen.Width, screen.Height,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = System.Drawing.Graphics.FromImage(full))
+            {
+                g.CopyFromScreen(0, 0, 0, 0, full.Size,
+                    System.Drawing.CopyPixelOperation.SourceCopy);
+            }
+
+            var width = Math.Min(MaxScreenshotWidth, full.Width);
+            var height = Math.Max(1, full.Height * width / Math.Max(1, full.Width));
+            using var small = new System.Drawing.Bitmap(full, new System.Drawing.Size(width, height));
+            Directory.CreateDirectory(directory);
+            var stamp = DateTimeOffset.UtcNow.ToString("HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8];
+            var path = Path.Combine(directory, $"shot-{stamp}.png");
+            small.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            return path;
+        }, ct);
+    }
+
     public async Task<ActiveWindow> OpenAppAsync(string name, CancellationToken ct)
     {
         var token = NormalizeAppName(name);

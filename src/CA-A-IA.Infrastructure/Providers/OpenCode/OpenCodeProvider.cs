@@ -109,6 +109,12 @@ public sealed class OpenCodeProvider : IAIProvider, IAsyncDisposable
         var prompt = string.Join("\n\n", request.Messages
             .Where(m => m.Role is AIRole.System or AIRole.User)
             .Select(m => m.Role == AIRole.System ? $"[system]\n{m.Content}" : m.Content));
+        var images = request.Messages
+            .SelectMany(m => m.Images ?? Enumerable.Empty<string>())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList();
         if (request.Tools.Count > 0)
         {
             _clientLog.LogDebug("OpenCode ignores {Tools} caller tool definitions (server-side tools).",
@@ -127,7 +133,7 @@ public sealed class OpenCodeProvider : IAIProvider, IAsyncDisposable
         try
         {
             answer = await client.PromptAsync(session.Id, prompt, providerId, modelId, directory, timeout, ct,
-                NormalizeEffort(request.ReasoningEffort)).ConfigureAwait(false);
+                NormalizeEffort(request.ReasoningEffort), images).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

@@ -1,26 +1,32 @@
 // CA-A-IA — Atajos GLOBALES de sistema (funcionan en cualquier app):
-// Ctrl+J = pausar al agente, Ctrl+K = reanudar. Vía RegisterHotKey + ventana
-// solo-mensajes en hilo propio. Si el combo está ocupado, se sigue sin atajos.
+// Shift izq.+A = pausar al agente, Shift izq.+S = reanudar. Vía hook de teclado
+// de bajo nivel (WH_KEYBOARD_LL): RegisterHotKey no distingue shift izq./der.
+// No se traga NADA: las teclas siguen llegando a la app enfocada (escribir
+// mayúsculas funciona igual); solo se dispara en el flanco de pulsación.
 
 using System.Runtime.InteropServices;
 
 namespace CaAIA.Infrastructure.Process;
 
 /// <summary>
-/// Hotkeys de sistema con ventana <c>HWND_MESSAGE</c> en hilo dedicado.
-/// Los callbacks llegan en ese hilo: quien los recibe debe apoyarse en comandos
-/// del VM (ya marshalan a UI) o en servicios thread-safe.
+/// Hook LL en hilo propio con bucle de mensajes. Los callbacks llegan en ese
+/// hilo: quien los recibe debe apoyarse en comandos del VM (ya marshalan a UI)
+/// o en servicios thread-safe.
 /// </summary>
 public sealed class GlobalHotkeys : IDisposable
 {
-    private const int WM_HOTKEY = 0x0312;
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_SYSKEYDOWN = 0x0104;
     private const int WM_QUIT = 0x0012;
-    private const uint MOD_CONTROL = 0x0002;
-    private const uint MOD_NOREPEAT = 0x4000;
-    private const uint VK_J = 0x4A;
-    private const uint VK_K = 0x4B;
+    private const int VK_LSHIFT = 0xA0;
+    private const int VK_A = 0x41;
+    private const int VK_S = 0x53;
 
-    private static readonly nint HWND_MESSAGE = new(-3);
+    // KBDLLHOOKSTRUCT.flags: bit 7 = tecla soltada (transición).
+    private const uint LLKHF_UP = 0x80;
+
+    private const long DebounceTicks = TimeSpan.TicksPerMillisecond * 500;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MSG
@@ -34,23 +40,17 @@ public sealed class GlobalHotkeys : IDisposable
         public int y;
     }
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern nint CreateWindowEx(
-        uint exStyle, string className, string windowName, uint style,
-        int x, int y, int width, int height,
-        nint parent, nint menu, nint instance, nint param);
+    private delegate nint HookProc(int nCode, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SetWindowsHookEx(int idHook, HookProc lpfn, nint hMod, uint dwThreadId);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DestroyWindow(nint hWnd);
+    private static extern bool UnhookWindowsHookEx(nint hhk);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool RegisterHotKey(nint hWnd, int id, uint modifiers, uint vk);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool UnregisterHotKey(nint hWnd, int id);
+    [DllImport("user32.dll")]
+    private static extern nint CallNextHookEx(nint hhk, int nCode, nint wParam, nint lParam);
 
     [DllImport("user32.dll")]
     private static extern int GetMessage(out MSG msg, nint hWnd, uint filterMin, uint filterMax);
@@ -63,20 +63,36 @@ public sealed class GlobalHotkeys : IDisposable
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool PostMessage(nint hWnd, uint msg, nuint wParam, nint lParam);
+    private static extern bool PostThreadMessage(uint threadId, uint msg, nuint wParam, nint lParam);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern nint GetModuleHandle(string? moduleName);
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    private readonly HookProc _hook;
     private Thread? _thread;
-    private nint _hwnd;
+    private nint _hookHandle;
+    private uint _hookThreadId;
     private volatile bool _running;
+    private volatile bool _lShiftDown;
+    private volatile bool _aDown;
+    private volatile bool _sDown;
+    private long _lastPauseTicks;
+    private long _lastResumeTicks;
     private Func<Task>? _onPause;
     private Func<Task>? _onResume;
     private readonly ManualResetEventSlim _ready = new(false);
     private bool _disposed;
 
-    /// <summary>Registra Ctrl+J / Ctrl+K. Devuelve false si el sistema los deniega.</summary>
+    public GlobalHotkeys()
+    {
+        // Fijar el delegado: si el GC lo mueve/libera, el hook muere.
+        _hook = HookCallback;
+    }
+
+    /// <summary>Instala el hook. Devuelve false si el sistema lo deniega.</summary>
     public bool Start(Func<Task> onPause, Func<Task> onResume)
     {
         _onPause = onPause ?? throw new ArgumentNullException(nameof(onPause));
@@ -84,16 +100,8 @@ public sealed class GlobalHotkeys : IDisposable
         _running = true;
         _thread = new Thread(Loop) { IsBackground = true, Name = "CA-A-IA-hotkeys" };
         _thread.Start();
-        if (!_ready.Wait(TimeSpan.FromSeconds(5)) || _hwnd == nint.Zero)
+        if (!_ready.Wait(TimeSpan.FromSeconds(5)) || _hookHandle == nint.Zero)
         {
-            Stop();
-            return false;
-        }
-
-        if (!RegisterHotKey(_hwnd, 1, MOD_CONTROL | MOD_NOREPEAT, VK_J)
-            || !RegisterHotKey(_hwnd, 2, MOD_CONTROL | MOD_NOREPEAT, VK_K))
-        {
-            // Ocupados por otra app: sin atajos, sin romper nada.
             Stop();
             return false;
         }
@@ -106,11 +114,15 @@ public sealed class GlobalHotkeys : IDisposable
         _running = false;
         try
         {
-            if (_hwnd != nint.Zero)
+            if (_hookHandle != nint.Zero)
             {
-                UnregisterHotKey(_hwnd, 1);
-                UnregisterHotKey(_hwnd, 2);
-                PostMessage(_hwnd, WM_QUIT, nuint.Zero, nint.Zero);
+                UnhookWindowsHookEx(_hookHandle);
+                _hookHandle = nint.Zero;
+            }
+
+            if (_hookThreadId != 0)
+            {
+                PostThreadMessage(_hookThreadId, WM_QUIT, nuint.Zero, nint.Zero);
             }
         }
         catch (Exception)
@@ -132,19 +144,19 @@ public sealed class GlobalHotkeys : IDisposable
     {
         try
         {
-            _hwnd = CreateWindowEx(0, "STATIC", "CA-A-IA-hotkeys", 0,
-                0, 0, 0, 0, HWND_MESSAGE, nint.Zero, GetModuleHandle(null), nint.Zero);
+            _hookThreadId = GetCurrentThreadId();
+            _hookHandle = SetWindowsHookEx(WH_KEYBOARD_LL, _hook, nint.Zero, 0);
         }
         catch (Exception)
         {
-            _hwnd = nint.Zero;
+            _hookHandle = nint.Zero;
         }
         finally
         {
             _ready.Set();
         }
 
-        if (_hwnd == nint.Zero)
+        if (_hookHandle == nint.Zero)
         {
             return;
         }
@@ -153,25 +165,6 @@ public sealed class GlobalHotkeys : IDisposable
         {
             while (_running && GetMessage(out var msg, nint.Zero, 0, 0) > 0)
             {
-                if (msg.message == WM_HOTKEY)
-                {
-                    var id = (int)msg.wParam;
-                    var action = id == 1 ? _onPause : id == 2 ? _onResume : null;
-                    if (action is not null)
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                await action().ConfigureAwait(false);
-                            }
-                            catch (Exception)
-                            {
-                            }
-                        });
-                    }
-                }
-
                 TranslateMessage(ref msg);
                 DispatchMessage(ref msg);
             }
@@ -181,19 +174,127 @@ public sealed class GlobalHotkeys : IDisposable
         }
         finally
         {
-            if (_hwnd != nint.Zero)
+            try
             {
-                try
+                if (_hookHandle != nint.Zero)
                 {
-                    DestroyWindow(_hwnd);
+                    UnhookWindowsHookEx(_hookHandle);
+                    _hookHandle = nint.Zero;
                 }
-                catch (Exception)
-                {
-                }
-
-                _hwnd = nint.Zero;
+            }
+            catch (Exception)
+            {
             }
         }
+    }
+
+    private nint HookCallback(int nCode, nint wParam, nint lParam)
+    {
+        try
+        {
+            if (nCode >= 0 && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN))
+            {
+                var vk = Marshal.ReadInt32(lParam);
+                var flags = (uint)Marshal.ReadInt32(lParam, 8);
+                var up = (flags & LLKHF_UP) != 0;
+                if (vk == VK_LSHIFT)
+                {
+                    _lShiftDown = !up;
+                }
+                else if (vk == VK_A || vk == VK_S)
+                {
+                    if (up)
+                    {
+                        if (vk == VK_A)
+                        {
+                            _aDown = false;
+                        }
+                        else
+                        {
+                            _sDown = false;
+                        }
+                    }
+                    else if (IsLeftShiftHeld() && Edge(vk))
+                    {
+                        if (vk == VK_A)
+                        {
+                            Fire(_onPause, ref _lastPauseTicks);
+                        }
+                        else
+                        {
+                            Fire(_onResume, ref _lastResumeTicks);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        // Jamás tragar: todo sigue a la app enfocada.
+        return CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+    }
+
+    private static bool IsLeftShiftHeld()
+    {
+        try
+        {
+            return (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Flanco de pulsación (una vez por bajada): filtra auto-repetición.</summary>
+    private bool Edge(int vk)
+    {
+        if (vk == VK_A)
+        {
+            if (_aDown)
+            {
+                return false;
+            }
+
+            _aDown = true;
+            return true;
+        }
+
+        if (_sDown)
+        {
+            return false;
+        }
+
+        _sDown = true;
+        return true;
+    }
+
+    private static void Fire(Func<Task>? action, ref long lastTicks)
+    {
+        if (action is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow.Ticks;
+        if (now - Volatile.Read(ref lastTicks) < DebounceTicks)
+        {
+            return;
+        }
+
+        Volatile.Write(ref lastTicks, now);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await action().ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+            }
+        });
     }
 
     public void Dispose()
@@ -206,5 +307,6 @@ public sealed class GlobalHotkeys : IDisposable
         _disposed = true;
         Stop();
         _ready.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

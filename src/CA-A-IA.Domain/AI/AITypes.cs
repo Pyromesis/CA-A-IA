@@ -41,14 +41,18 @@ public enum AIRole
     Tool = 3,
 }
 
-/// <summary>Mensaje individual (incluye llamadas a herramientas del asistente).</summary>
+/// <summary>Mensaje individual (incluye llamadas a herramientas del asistente e imágenes locales).</summary>
 public sealed record AIMessage(
     AIRole Role,
     string Content,
     IReadOnlyList<AIToolCall> ToolCallsMaker = null!,
-    string? ToolCallId = null)
+    string? ToolCallId = null,
+    IReadOnlyList<string>? ImagePaths = null)
 {
     public IReadOnlyList<AIToolCall> ToolCalls { get; init; } = ToolCallsMaker ?? Array.Empty<AIToolCall>();
+
+    /// <summary>Rutas locales de imágenes adjuntas (capturas). Cada adaptador las convierte.</summary>
+    public IReadOnlyList<string> Images { get; init; } = ImagePaths ?? Array.Empty<string>();
 }
 
 /// <summary>Solicitud de tool/function call emitida por el modelo.</summary>

@@ -66,6 +66,12 @@ public sealed class UiAutomationToolsTests
             Calls.Add($"wait:{text}");
             return Task.FromResult(true);
         }
+
+        public Task<string> CaptureScreenshotAsync(string directory, CancellationToken ct)
+        {
+            Calls.Add($"shot:{directory}");
+            return Task.FromResult(@"C:\tmp\shot-1.png");
+        }
     }
 
     private static ToolInvocation Invoke(string toolId, string args) =>
@@ -73,20 +79,34 @@ public sealed class UiAutomationToolsTests
             new Domain.Correlation.CorrelationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()));
 
     [Fact]
-    public void UiTools_RequireProcessControl()
+    public void UiTools_RequireProcessControl_ForMutations()
     {
-        ITool[] tools =
+        ITool[] mutating =
         {
-            new GetScreenSizeTool(new FakeUi()), new MoveMouseTool(new FakeUi()),
-            new ClickMouseTool(new FakeUi()), new ScrollMouseTool(new FakeUi()),
-            new TypeTextTool(new FakeUi()), new PressKeyTool(new FakeUi()),
-            new OpenAppTool(new FakeUi()), new OpenUrlTool(new FakeUi()),
-            new GetActiveWindowTool(new FakeUi()), new WaitForActiveWindowTool(new FakeUi()),
+            new MoveMouseTool(new FakeUi()), new ClickMouseTool(new FakeUi()),
+            new ScrollMouseTool(new FakeUi()), new TypeTextTool(new FakeUi()),
+            new PressKeyTool(new FakeUi()), new OpenAppTool(new FakeUi()),
+            new OpenUrlTool(new FakeUi()),
         };
-        Assert.All(tools, t =>
+        Assert.All(mutating, t =>
         {
             Assert.Equal(ToolKind.UiAutomation, t.Definition.Kind);
             Assert.True(t.Definition.RequiredPermissions.HasFlag(ToolPermission.ProcessControl));
+        });
+    }
+
+    [Fact]
+    public void UiTools_Observational_RequireOnlyRead()
+    {
+        ITool[] observational =
+        {
+            new GetScreenSizeTool(new FakeUi()), new GetActiveWindowTool(new FakeUi()),
+            new WaitForActiveWindowTool(new FakeUi()), new ScreenshotTool(new FakeUi()),
+        };
+        Assert.All(observational, t =>
+        {
+            Assert.Equal(ToolKind.UiAutomation, t.Definition.Kind);
+            Assert.Equal(ToolPermission.Read, t.Definition.RequiredPermissions);
         });
     }
 
@@ -199,6 +219,18 @@ public sealed class UiAutomationToolsTests
     [InlineData("UiOpenUrl", "{\"url\":\"https://youtube.com/abc\"}", "▶ Abrió https://youtube.com/abc")]
     public void ForToolCompleted_NarratesUiActions(string toolId, string args, string expected) =>
         Assert.Equal(expected, AgentActivityText.ForToolCompleted(toolId, args, true, null));
+
+    [Fact]
+    public async Task Screenshot_ReturnsPath_AsAttachment()
+    {
+        var ui = new FakeUi();
+        var tool = new ScreenshotTool(ui);
+        var result = await tool.ExecuteAsync(
+            Invoke(ScreenshotTool.ToolId, "{}"), CancellationToken.None);
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(@"C:\tmp\shot-1.png", result.AttachmentPath);
+        Assert.Contains(result.AttachmentPath, result.Output);
+    }
 
     [Theory]
     [InlineData(0.0, 0.0)]

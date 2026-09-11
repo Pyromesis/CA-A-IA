@@ -23,6 +23,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+    <PackageReference Include="System.Drawing.Common" />
   </ItemGroup>
   <!-- Seams internas testeables (parseo OpenCode, etc.) -->
   <ItemGroup>

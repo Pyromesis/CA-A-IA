@@ -70,9 +70,9 @@ public partial class App : Microsoft.UI.Xaml.Application
             _window.Closed += OnWindowClosed;
             _window.Activate();
 
-            // Atajos globales: Ctrl+J pausa y Ctrl+K reanuda estén donde estén
-            // (funcionan hasta con otra app al frente). Si el sistema los deniega,
-            // la app sigue igual: los botones del Chat hacen lo mismo.
+            // Atajos globales: Mayús izq.+A pausa y Mayús izq.+S reanuda estén
+            // donde estén (funcionan hasta con otra app al frente). Si el sistema
+            // los deniega, la app sigue igual: los botones del Chat hacen lo mismo.
             try
             {
                 _hotkeys = new Infrastructure.Process.GlobalHotkeys();

@@ -360,7 +360,7 @@ public sealed class OpenAICompatibleClient
         return new StringContent(Encoding.UTF8.GetString(ms.ToArray()), Encoding.UTF8, "application/json");
     }
 
-    private static void WriteMessage(Utf8JsonWriter writer, AIMessage message)
+    private void WriteMessage(Utf8JsonWriter writer, AIMessage message)
     {
         writer.WriteStartObject();
         writer.WriteString("role", message.Role switch
@@ -370,7 +370,34 @@ public sealed class OpenAICompatibleClient
             AIRole.Tool => "tool",
             _ => "user",
         });
-        writer.WriteString("content", message.Content);
+        var images = ReadImages(message.Images);
+        if (images.Count == 0)
+        {
+            writer.WriteString("content", message.Content);
+        }
+        else
+        {
+            // Contenido multimodal: texto + image_url (requiere modelo con visión).
+            writer.WritePropertyName("content");
+            writer.WriteStartArray();
+            writer.WriteStartObject();
+            writer.WriteString("type", "text");
+            writer.WriteString("text", message.Content);
+            writer.WriteEndObject();
+            foreach (var image in images)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("type", "image_url");
+                writer.WritePropertyName("image_url");
+                writer.WriteStartObject();
+                writer.WriteString("url", $"data:{image.Mime};base64,{image.Base64}");
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
         if (message.Role == AIRole.Tool && message.ToolCallId is not null)
         {
             writer.WriteString("tool_call_id", message.ToolCallId);
@@ -397,6 +424,55 @@ public sealed class OpenAICompatibleClient
         }
 
         writer.WriteEndObject();
+    }
+
+    private sealed record EncodedImage(string Mime, string Base64);
+
+    /// <summary>Lee imágenes locales (tope 6 MB c/u): lo ilegible se omite, nunca rompe.</summary>
+    private List<EncodedImage> ReadImages(IReadOnlyList<string> paths)
+    {
+        var result = new List<EncodedImage>();
+        if (paths is null || paths.Count == 0)
+        {
+            return result;
+        }
+
+        foreach (var path in paths)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                var info = new FileInfo(path);
+                if (!info.Exists || info.Length is <= 0 or > 6 * 1024 * 1024)
+                {
+                    continue;
+                }
+
+                var bytes = File.ReadAllBytes(path);
+                var mime = Path.GetExtension(path).ToLowerInvariant() switch
+                {
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".webp" => "image/webp",
+                    ".gif" => "image/gif",
+                    _ => "image/png",
+                };
+                result.Add(new EncodedImage(mime, Convert.ToBase64String(bytes)));
+                if (result.Count >= 4)
+                {
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogDebug(ex, "Skipping unreadable image {Path}", path);
+            }
+        }
+
+        return result;
     }
 
     private async Task<HttpResponseMessage> SendAsync(

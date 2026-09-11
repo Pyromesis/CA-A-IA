@@ -33,5 +33,7 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <!-- Seguridad (DPAPI en Windows) -->
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <!-- Capturas de pantalla (solo Windows) -->
+    <PackageVersion Include="System.Drawing.Common" Version="10.0.0" />
   </ItemGroup>
 </Project>
