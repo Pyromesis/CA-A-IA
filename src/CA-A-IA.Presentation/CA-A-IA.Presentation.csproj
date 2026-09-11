@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- CA-A-IA.Presentation: WinUI 3 (Windows App SDK 2.4) · Composition Root.
+       Único proyecto que puede referenciar a todas las capas. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>CaAIA.Presentation</RootNamespace>
+    <AssemblyName>CA-A-IA.Presentation</AssemblyName>
+    <!-- Icono de marca CA (ámbar + tinta): exe, accesos directos y desinstalador. -->
+    <ApplicationIcon>Assets\CA-A-IA.ico</ApplicationIcon>
+    <UseWinUI>true</UseWinUI>
+    <!-- Self-contained exige arquitectura: AnyCPU + RID win-x64 (ver SelfContained.targets). -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Requerido por config.AddUserSecrets(assembly, optional: true) en DEBUG. -->
+    <UserSecretsId>ca-a-ia-presentation-fase0-dev</UserSecretsId>
+    <!-- Ejecutable desempaquetado en Fase 0 (MSIX en fases posteriores) -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>false</EnableMsixTooling>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CA-A-IA.Domain\CA-A-IA.Domain.csproj" />
+    <ProjectReference Include="..\CA-A-IA.Application\CA-A-IA.Application.csproj" />
+    <ProjectReference Include="..\CA-A-IA.Agent\CA-A-IA.Agent.csproj" />
+    <ProjectReference Include="..\CA-A-IA.Infrastructure\CA-A-IA.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <!-- XAML: el SDK (Microsoft.WinUI.targets) incluye App.xaml/Page por defecto. -->
+</Project>

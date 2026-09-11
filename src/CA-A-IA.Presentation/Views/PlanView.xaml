@@ -1,0 +1,126 @@
+<UserControl
+    x:Class="CaAIA.Presentation.Views.PlanView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CaAIA.Presentation.Views">
+    <UserControl.Resources>
+        <local:StatusBrushConverter x:Key="StatusBrush" />
+        <local:ZeroCountToVisibilityConverter x:Key="EmptyVisibility" />
+        <local:NonZeroCountToVisibilityConverter x:Key="ListVisibility" />
+    </UserControl.Resources>
+    <Grid RowSpacing="10" Padding="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Estado del plan -->
+        <Border Grid.Row="0" Style="{StaticResource CardPanelStyle}" Padding="12">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Grid.Column="0" Glyph="&#xE8A5;" FontSize="20"
+                          Foreground="{ThemeResource AppBrandBrush}" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <TextBlock Text="PLAN ACTIVO" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
+                    <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                               FontWeight="SemiBold" TextWrapping="WrapWholeWords" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Content="Aprobar y ejecutar" Command="{x:Bind ViewModel.ApproveAndRunCommand}"
+                            Style="{StaticResource AppPrimaryButtonStyle}" />
+                    <Button Content="Cancelar" Command="{x:Bind ViewModel.CancelRunCommand}"
+                            Style="{StaticResource AppGhostButtonStyle}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Preguntas del agente -->
+        <Border Grid.Row="2" Style="{StaticResource CardPanelStyle}"
+                Visibility="{x:Bind ViewModel.HasQuestionsVisibility, Mode=OneWay}">
+        <Grid ColumnSpacing="8" RowSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Spacing="1">
+                <TextBlock Text="EL AGENTE PREGUNTA" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
+                <ComboBox ItemsSource="{x:Bind ViewModel.OpenQuestions, Mode=OneWay}"
+                          SelectedItem="{x:Bind ViewModel.SelectedQuestion, Mode=TwoWay}"
+                          DisplayMemberPath="Question" HorizontalAlignment="Stretch"
+                          PlaceholderText="Elige una pregunta…" />
+            </StackPanel>
+            <RadioButtons Grid.Row="1" Grid.ColumnSpan="2" Header="Elige una respuesta"
+                          ItemsSource="{x:Bind ViewModel.CurrentOptions, Mode=OneWay}"
+                          SelectedItem="{x:Bind ViewModel.SelectedOption, Mode=TwoWay}" />
+            <TextBox Grid.Row="2" Grid.Column="0"
+                     Text="{x:Bind ViewModel.AnswerText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     PlaceholderText="Otro: escribe tu respuesta libre…" CornerRadius="8" />
+            <Button Grid.Row="2" Grid.Column="1" Content="Responder"
+                    Command="{x:Bind ViewModel.AnswerCommand}"
+                    Style="{StaticResource AppPrimaryButtonStyle}" VerticalAlignment="Bottom" />
+        </Grid>
+        </Border>
+
+        <!-- Tareas -->
+        <Grid Grid.Row="3">
+            <ListView ItemsSource="{x:Bind ViewModel.PlanTasks, Mode=OneWay}"
+                      Visibility="{x:Bind ViewModel.PlanTasks.Count, Mode=OneWay, Converter={StaticResource ListVisibility}}"
+                      SelectionMode="None">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0,4" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <EntranceThemeTransition IsStaggeringEnabled="True" />
+                        <RepositionThemeTransition />
+                    </TransitionCollection>
+                </ListView.ItemContainerTransitions>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource InteractiveCardStyle}"
+                                HorizontalAlignment="Stretch">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Grid.Column="0" Width="10" Height="10"
+                                         Fill="{Binding Status, Converter={StaticResource StatusBrush}}"
+                                         VerticalAlignment="Top" Margin="0,5,0,0" />
+                                <StackPanel Grid.Column="1" Spacing="3">
+                                    <TextBlock Text="{Binding Title}" Style="{StaticResource CardTitleStyle}" />
+                                    <Border Style="{StaticResource StatusPillStyle}"
+                                            HorizontalAlignment="Left" Padding="8,1">
+                                        <TextBlock Text="{Binding Status}" FontSize="11"
+                                                   Foreground="{Binding Status, Converter={StaticResource StatusBrush}}" />
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="{x:Bind ViewModel.PlanTasks.Count, Mode=OneWay, Converter={StaticResource EmptyVisibility}}">
+                <FontIcon Glyph="&#xE8A5;" Style="{StaticResource EmptyStateIconStyle}" />
+                <TextBlock Text="Sin plan todavía" Style="{StaticResource EmptyStateTitleStyle}" />
+                <TextBlock Text="Pide algo en el Chat y el agente preparará aquí el plan paso a paso."
+                           Style="{StaticResource EmptyStateBodyStyle}" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CA-A-IA.Domain/CA-A-IA.Domain.csproj" />
+    <Project Path="src/CA-A-IA.Application/CA-A-IA.Application.csproj" />
+    <Project Path="src/CA-A-IA.Infrastructure/CA-A-IA.Infrastructure.csproj" />
+    <Project Path="src/CA-A-IA.Agent/CA-A-IA.Agent.csproj" />
+    <Project Path="src/CA-A-IA.Presentation/CA-A-IA.Presentation.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CA-A-IA.Tests.Unit/CA-A-IA.Tests.Unit.csproj" />
+    <Project Path="tests/CA-A-IA.Tests.Integration/CA-A-IA.Tests.Integration.csproj" />
+    <Project Path="tests/CA-A-IA.Tests.Architecture/CA-A-IA.Tests.Architecture.csproj" />
+  </Folder>
+</Solution>

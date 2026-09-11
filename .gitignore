@@ -1,0 +1,56 @@
+# CA-A-IA · .gitignore (.NET 10 + WinUI 3 + VS)
+
+## Build ##
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+publish/
+
+## .NET ##
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+_TestResults/
+TestResult.xml
+*.coverage
+*.coveragexml
+project.lock.json
+project.fragment.lock.json
+artifacts/
+!**/[Pp]ackages/build/
+
+## NuGet ##
+*.nupkg
+*.snupkg
+.nuget/packages/
+packages/
+
+## WinUI / MSIX ##
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+*.appx
+*.msix
+*.msixbundle
+*.appxsym
+*.cer
+*.pfx
+
+## Instalador Inno Setup (se compila con installer\Build-Installer.ps1) ##
+installer/Output/
+
+## Secrets (nunca commitear) ##
+appsettings.Development.json
+appsettings.*.local.json
+secrets.json
+
+## OS ##
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## Datos locales de la app (ver PersistenceArchitecture.md) ##
+# NOTA: %LocalAppData%/CA-A-IA vive fuera del repo por diseño; nada que ignorar aquí.

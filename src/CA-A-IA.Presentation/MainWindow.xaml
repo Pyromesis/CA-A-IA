@@ -1,0 +1,72 @@
+<Window
+    x:Class="CaAIA.Presentation.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid RowSpacing="0" Background="{ThemeResource AppPageBackground}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <NavigationView x:Name="Nav" Grid.Row="0"
+                        IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="False"
+                        PaneDisplayMode="Left"
+                        SelectionChanged="Nav_SelectionChanged">
+            <NavigationView.PaneHeader>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,8,0,4"
+                            VerticalAlignment="Center">
+                    <Border Width="32" Height="32" CornerRadius="9"
+                            Background="{ThemeResource AppBrandBrush}"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="CA" FontWeight="Bold" FontSize="13"
+                                   Foreground="{ThemeResource AppBrandInk}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Spacing="0" VerticalAlignment="Center">
+                        <TextBlock Text="CA-A-IA" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Agente IA local" FontSize="11" Opacity="0.6" />
+                    </StackPanel>
+                </StackPanel>
+            </NavigationView.PaneHeader>
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Chat" Tag="chat" Icon="Comment" />
+                <NavigationViewItem Content="Historial" Tag="history" Icon="Clock" />
+                <NavigationViewItem Content="Plan" Tag="plan" Icon="Document" />
+                <NavigationViewItem Content="Tareas" Tag="tasks" Icon="List" />
+                <NavigationViewItem Content="Archivos" Tag="files" Icon="Folder" />
+                <NavigationViewItem Content="Salida" Tag="output" Icon="ShowResults" />
+                <NavigationViewItem Content="Ajustes" Tag="settings" Icon="Setting" />
+            </NavigationView.MenuItems>
+            <NavigationView.Header>
+                <StackPanel Spacing="0" Margin="0,12,0,4">
+                    <TextBlock x:Name="HeaderText" Text="Chat" Style="{StaticResource TitleTextBlockStyle}" />
+                    <TextBlock x:Name="HeaderSub" Text="Habla con tu agente"
+                               Style="{StaticResource FaintCaptionStyle}" FontSize="12" />
+                </StackPanel>
+            </NavigationView.Header>
+            <ContentControl x:Name="ContentHost"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch" />
+        </NavigationView>
+        <Border Grid.Row="1" Background="{ThemeResource AppCardBackground}"
+                BorderThickness="0,1,0,0" BorderBrush="{ThemeResource AppCardBorder}"
+                Padding="12,7">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Border CornerRadius="8" Padding="7,4" Style="{StaticResource StatusPillStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                        <Ellipse Width="8" Height="8" Fill="{x:Bind Status.StateBrush, Mode=OneWay}"
+                                 VerticalAlignment="Center" />
+                        <TextBlock Text="{x:Bind Status.AgentState, Mode=OneWay}"
+                                   FontWeight="SemiBold" FontSize="12" />
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="{x:Bind Status.SessionInfo, Mode=OneWay}" Opacity="0.75"
+                           FontFamily="Consolas" FontSize="12" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="·" Opacity="0.35" VerticalAlignment="Center" />
+                <TextBlock Text="{x:Bind Status.ProviderInfo, Mode=OneWay}" Opacity="0.75"
+                           FontSize="12" VerticalAlignment="Center" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

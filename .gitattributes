@@ -1,0 +1,9 @@
+# CA-A-IA · normalización de finales de línea + binarios.
+* text=auto
+*.ico binary
+*.png binary
+*.exe binary
+*.dll binary
+*.pdb binary
+*.pri binary
+*.xbf binary

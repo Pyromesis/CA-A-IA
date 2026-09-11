@@ -1,0 +1,161 @@
+<Application
+    x:Class="CaAIA.Presentation.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Identidad CA-A-IA: tinta de editor + ámbar de taller (tokens por tema). -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppPageBackground" Color="#0B0E14" />
+                    <SolidColorBrush x:Key="AppPageBackgroundAlt" Color="#0E1320" />
+                    <SolidColorBrush x:Key="AppCardBackground" Color="#121724" />
+                    <SolidColorBrush x:Key="AppCardBorder" Color="#263049" />
+                    <SolidColorBrush x:Key="AppBrandBrush" Color="#F0A92E" />
+                    <SolidColorBrush x:Key="AppBrandBrushHover" Color="#F5BC55" />
+                    <SolidColorBrush x:Key="AppBrandInk" Color="#1A1206" />
+                    <SolidColorBrush x:Key="AppMutedText" Color="#8B94A7" />
+                    <SolidColorBrush x:Key="AppFaintText" Color="#5B6478" />
+                    <SolidColorBrush x:Key="AppSuccessBrush" Color="#3DDC84" />
+                    <SolidColorBrush x:Key="AppWarningBrush" Color="#F0A92E" />
+                    <SolidColorBrush x:Key="AppDangerBrush" Color="#FF7262" />
+                    <SolidColorBrush x:Key="AppInfoBrush" Color="#4CC2FF" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppPageBackground" Color="#F6F3EA" />
+                    <SolidColorBrush x:Key="AppPageBackgroundAlt" Color="#EFEAD9" />
+                    <SolidColorBrush x:Key="AppCardBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="AppCardBorder" Color="#E0D6BE" />
+                    <SolidColorBrush x:Key="AppBrandBrush" Color="#C77F0A" />
+                    <SolidColorBrush x:Key="AppBrandBrushHover" Color="#DB9016" />
+                    <SolidColorBrush x:Key="AppBrandInk" Color="#1A1206" />
+                    <SolidColorBrush x:Key="AppMutedText" Color="#6B7280" />
+                    <SolidColorBrush x:Key="AppFaintText" Color="#9AA1AD" />
+                    <SolidColorBrush x:Key="AppSuccessBrush" Color="#0E7A3D" />
+                    <SolidColorBrush x:Key="AppWarningBrush" Color="#C77F0A" />
+                    <SolidColorBrush x:Key="AppDangerBrush" Color="#C93A2E" />
+                    <SolidColorBrush x:Key="AppInfoBrush" Color="#0B6FA4" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="AppPageBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="AppPageBackgroundAlt" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="AppCardBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="AppCardBorder" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="AppBrandBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="AppBrandBrushHover" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="AppBrandInk" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="AppMutedText" Color="{ThemeResource SystemColorGrayTextColor}" />
+                    <SolidColorBrush x:Key="AppFaintText" Color="{ThemeResource SystemColorGrayTextColor}" />
+                    <SolidColorBrush x:Key="AppSuccessBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="AppWarningBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="AppDangerBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="AppInfoBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <!-- Tarjeta de panel: fondo + borde + esquinas + aire coherentes en toda la app. -->
+            <Style x:Key="CardPanelStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource AppCardBackground}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardBorder}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="12" />
+            </Style>
+
+            <!-- Botón primario de marca (ámbar + tinta), para Enviar / Aprobar. -->
+            <Style x:Key="AppPrimaryButtonStyle" TargetType="Button"
+                   BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="{ThemeResource AppBrandBrush}" />
+                <Setter Property="Foreground" Value="{ThemeResource AppBrandInk}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Padding" Value="20,8" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+
+            <!-- Burbuja base del chat (las variantes de rol ajustan fondo/alineación). -->
+            <Style x:Key="ChatBubbleStyle" TargetType="Border">
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="Padding" Value="12,8" />
+                <Setter Property="MaxWidth" Value="780" />
+            </Style>
+
+            <!-- Etiqueta de rol dentro de la burbuja (TÚ / CA-A-IA / hora). -->
+            <Style x:Key="ChatRoleLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Opacity" Value="0.75" />
+            </Style>
+
+            <!-- Sistema de diseño v2: jerarquía de texto (eyebrow → título → cuerpo → muteado). -->
+            <Style x:Key="EyebrowLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="CharacterSpacing" Value="80" />
+                <Setter Property="Foreground" Value="{ThemeResource AppBrandBrush}" />
+                <Setter Property="Opacity" Value="1" />
+            </Style>
+            <Style x:Key="CardTitleStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="TextWrapping" Value="WrapWholeWords" />
+            </Style>
+            <Style x:Key="MutedBodyStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource AppMutedText}" />
+                <Setter Property="TextWrapping" Value="WrapWholeWords" />
+            </Style>
+            <Style x:Key="FaintCaptionStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource AppFaintText}" />
+            </Style>
+            <Style x:Key="CodeTextStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Consolas" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{ThemeResource AppMutedText}" />
+            </Style>
+
+            <!-- Botón fantasma: acción secundaria sobre tarjeta (Actualizar, Carpeta…). -->
+            <Style x:Key="AppGhostButtonStyle" TargetType="Button"
+                   BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardBorder}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="12,6" />
+            </Style>
+
+            <!-- Pastilla de estado (punto + etiqueta): el color lo pone el binding. -->
+            <Style x:Key="StatusPillStyle" TargetType="Border">
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="Padding" Value="8,3" />
+                <Setter Property="Background" Value="{ThemeResource AppPageBackgroundAlt}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource AppCardBorder}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+
+            <!-- Tarjeta clicable de lista (historial, tareas): hover + radio generoso. -->
+            <Style x:Key="InteractiveCardStyle" TargetType="Border" BasedOn="{StaticResource CardPanelStyle}">
+                <Setter Property="CornerRadius" Value="12" />
+                <Setter Property="Padding" Value="12" />
+            </Style>
+
+            <!-- Estado vacío: icono grande tenue + título + descripción + acción. -->
+            <Style x:Key="EmptyStateIconStyle" TargetType="FontIcon">
+                <Setter Property="FontSize" Value="40" />
+                <Setter Property="Foreground" Value="{ThemeResource AppFaintText}" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="EmptyStateTitleStyle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}">
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Setter Property="TextAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="EmptyStateBodyStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource AppMutedText}" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Setter Property="TextAlignment" Value="Center" />
+                <Setter Property="TextWrapping" Value="WrapWholeWords" />
+                <Setter Property="MaxWidth" Value="420" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

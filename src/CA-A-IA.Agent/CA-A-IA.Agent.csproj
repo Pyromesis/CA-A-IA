@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- CA-A-IA.Agent: máquina de estados + motor de ejecución + planner/verifier.
+       Depende de Application + Domain. PROHIBIDO referenciar Infrastructure o Presentation. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CaAIA.Agent</RootNamespace>
+    <AssemblyName>CA-A-IA.Agent</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CA-A-IA.Domain\CA-A-IA.Domain.csproj" />
+    <ProjectReference Include="..\CA-A-IA.Application\CA-A-IA.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+</Project>

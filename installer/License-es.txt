@@ -1,0 +1,25 @@
+﻿CA-A-IA — Acuerdo de licencia
+Copyright © CA. Todos los derechos reservados.
+
+1. OBJETO
+   CA le concede una licencia personal, intransferible y no exclusiva para
+   instalar y utilizar CA-A-IA en sus propios equipos Windows.
+
+2. USO PERMITIDO
+   Puede usar la aplicación para sus proyectos personales o profesionales.
+   Sus datos (conversaciones, ajustes, claves de API) permanecen en su equipo
+   y nunca se envían a CA: los modelos de IA que configure son servicios de
+   terceros con sus propias condiciones.
+
+3. LIMITACIONES
+   No está permitido revender, redistribuir ni modificar el instalador, ni
+   eludir las medidas de seguridad de la aplicación. La aplicación se entrega
+   "TAL CUAL", sin garantías de ningún tipo.
+
+4. RESPONSABILIDAD
+   El agente puede ejecutar comandos y modificar archivos dentro de la carpeta
+   del proyecto que usted elija. Revise los niveles de autorización en Ajustes
+   y supervise las acciones que aprueba. En la medida permitida por la ley, CA
+   no será responsable de daños derivados del uso del software.
+
+Si no está de acuerdo con estas condiciones, no instale el software.

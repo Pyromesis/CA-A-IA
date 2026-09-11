@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Tests de arquitectura: deben cargar Presentation (WinUI) solo por metadatos,
+       por lo que comparten su TFM Windows. No ejecutan UI. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>CaAIA.Tests.Architecture</RootNamespace>
+    <AssemblyName>CA-A-IA.Tests.Architecture</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CA-A-IA.Domain\CA-A-IA.Domain.csproj" />
+    <ProjectReference Include="..\..\src\CA-A-IA.Application\CA-A-IA.Application.csproj" />
+    <ProjectReference Include="..\..\src\CA-A-IA.Agent\CA-A-IA.Agent.csproj" />
+    <ProjectReference Include="..\..\src\CA-A-IA.Infrastructure\CA-A-IA.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CA-A-IA.Presentation\CA-A-IA.Presentation.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+</Project>
