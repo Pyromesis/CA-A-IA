@@ -303,6 +303,39 @@ public sealed class EngineTests : IDisposable
     }
 
     [Fact]
+    public async Task Factory_Recreate_AllowsRunAfterPause()
+    {
+        // Pausar consume el CTS interno: reanudar sobre el MISMO motor dejaría el
+        // próximo Run cancelado al instante. Recreate lo reemplaza por uno fresco.
+        var ctx = Stores();
+        var plan = new Plan
+        {
+            Goal = "Quick thing",
+            Requirements = new[] { "Quick thing" },
+            Tasks = new List<AgentTask> { new() { Title = "Quick thing", Description = "Quick" } },
+        };
+        var sessionId = await SeedAsync(ctx, plan);
+        var factory = new AgentEngineFactory(ctx.Sessions, ctx.Plans, ctx.Checkpoints, ctx.Events,
+            new ScriptedExecutor(_ => Task.FromResult(new TaskExecutionOutcome(true))),
+            new SatisfiedVerifier(), new InstantRepairPolicy(), EngineOptions(),
+            NullLogger<AgentExecutionEngine>.Instance);
+
+        var first = factory.GetOrCreate(sessionId);
+        await first.PauseAsync(CancellationToken.None);
+        Assert.Equal(AgentState.Paused, first.StateMachine.Current);
+
+        var second = factory.Recreate(sessionId);
+        Assert.NotSame(first, second);
+        Assert.Same(second, factory.GetOrCreate(sessionId));
+        await second.ResumeAsync(CancellationToken.None);
+        Assert.Equal(AgentState.Recovering, second.StateMachine.Current);
+
+        await second.RunAsync(sessionId, CancellationToken.None);
+        Assert.Equal(AgentState.Completed, second.StateMachine.Current);
+        await ((AgentExecutionEngine)second).DisposeAsync();
+    }
+
+    [Fact]
     public void FilterAlreadyAddressed_SkipsDuplicateGaps()
     {
         var plan = new Plan

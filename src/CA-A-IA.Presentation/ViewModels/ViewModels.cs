@@ -239,15 +239,54 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isAgentWorking;
 
+    /// <summary>Motor en pausa cooperativa (reanudable en la misma sesión).</summary>
+    [ObservableProperty]
+    private bool _isAgentPaused;
+
     public Visibility AgentStatusVisibility =>
         IsAgentWorking || !string.IsNullOrWhiteSpace(AgentStatus)
             ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>Botón ⏸: solo mientras trabaja sin pausa.</summary>
+    public Visibility PauseButtonVisibility =>
+        IsAgentWorking && !IsAgentPaused ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Botón ▶: solo en pausa (continúa la misma sesión).</summary>
+    public Visibility ResumeButtonVisibility =>
+        IsAgentPaused ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Botón ⏹: mientras trabaja o está en pausa.</summary>
+    public Visibility StopButtonVisibility =>
+        IsAgentWorking || IsAgentPaused ? Visibility.Visible : Visibility.Collapsed;
+
     partial void OnAgentStatusChanged(string value) =>
         OnPropertyChanged(nameof(AgentStatusVisibility));
 
-    partial void OnIsAgentWorkingChanged(bool value) =>
+    partial void OnIsAgentWorkingChanged(bool value)
+    {
         OnPropertyChanged(nameof(AgentStatusVisibility));
+        OnPropertyChanged(nameof(PauseButtonVisibility));
+        OnPropertyChanged(nameof(StopButtonVisibility));
+    }
+
+    partial void OnIsAgentPausedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PauseButtonVisibility));
+        OnPropertyChanged(nameof(ResumeButtonVisibility));
+        OnPropertyChanged(nameof(StopButtonVisibility));
+    }
+
+    private void SetPaused(bool paused)
+    {
+        if (_dispatcher.HasThreadAccess)
+        {
+            IsAgentPaused = paused;
+        }
+        else
+        {
+            _dispatcher.TryEnqueue(() => { IsAgentPaused = paused; });
+        }
+    }
 
     private void SetActivity(string? text, bool working = true)
     {
@@ -874,6 +913,28 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
                 await RestoreLiveAsync(ct).ConfigureAwait(true);
             }
 
+            // Instrucción nueva con trabajo pausado: se descarta lo pausado
+            // (cancelación limpia) para que no quede un motor colgado.
+            if (IsAgentPaused)
+            {
+                var pausedSession = _sessions.CurrentSessionId;
+                if (pausedSession.HasValue)
+                {
+                    try
+                    {
+                        await _coordinator.CancelAsync(pausedSession.Value, ct).ConfigureAwait(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        AddMessage(new ChatMessage(ChatRole.Agent,
+                            $"No pude descartar lo pausado: {ex.Message}", DateTimeOffset.Now));
+                        return;
+                    }
+                }
+
+                IsAgentPaused = false;
+            }
+
             var text = Input.Trim();
             AddMessage(new ChatMessage(ChatRole.User, text, DateTimeOffset.Now));
             Input = string.Empty;
@@ -958,6 +1019,87 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
     partial void OnInputChanged(string value) => SendCommand.NotifyCanExecuteChanged();
 
+    /// <summary>⏸ Pausa cooperativa: congela el bucle con checkpoint (reanodable).</summary>
+    [RelayCommand]
+    private async Task PauseAsync(CancellationToken ct)
+    {
+        var sessionId = _sessions.CurrentSessionId;
+        if (!IsAgentWorking || IsAgentPaused || sessionId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _coordinator.PauseAsync(sessionId.Value, ct).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                $"No pude pausar: {ex.Message}", DateTimeOffset.Now));
+        }
+    }
+
+    /// <summary>▶ Reanuda la sesión pausada y continúa sus tareas pendientes.</summary>
+    [RelayCommand]
+    private async Task ResumeAsync(CancellationToken ct)
+    {
+        var sessionId = _sessions.CurrentSessionId;
+        if (!IsAgentPaused || sessionId is null || IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await _coordinator.ResumeAsync(sessionId.Value, ct).ConfigureAwait(true);
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                "Reanudando donde lo dejamos…", DateTimeOffset.Now));
+            await Task.Run(() => _coordinator.RunAsync(sessionId.Value, CancellationToken.None), ct)
+                .ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                "Reanudación cancelada.", DateTimeOffset.Now));
+        }
+        catch (Exception ex)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                $"No pude reanudar: {ex.Message}", DateTimeOffset.Now));
+        }
+        finally
+        {
+            IsBusy = false;
+            SendCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>⏹ Detiene del todo: cancela el motor y libera la sesión.</summary>
+    [RelayCommand]
+    private async Task StopAsync(CancellationToken ct)
+    {
+        var sessionId = _sessions.CurrentSessionId;
+        if ((!IsAgentWorking && !IsAgentPaused) || sessionId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _coordinator.CancelAsync(sessionId.Value, ct).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                $"No pude detener: {ex.Message}", DateTimeOffset.Now));
+            return;
+        }
+
+        IsAgentPaused = false;
+    }
+
     private void AddMessage(ChatMessage message)
     {
         if (_dispatcher.HasThreadAccess)
@@ -993,6 +1135,22 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>Narración del agente en el chat + línea de actividad en vivo.</summary>
     private Task OnAgentEventAsync(Domain.Events.AgentEvent e, CancellationToken ct)
     {
+        // Pausa/stop propios: el flag gobierna los botones ⏸/▶/⏹.
+        if (e.Type == AgentEventType.AgentPaused)
+        {
+            SetPaused(true);
+            return Task.CompletedTask;
+        }
+
+        if (e.Type is AgentEventType.AgentResumed or AgentEventType.AgentStopped)
+        {
+            SetPaused(false);
+            if (e.Type == AgentEventType.AgentStopped)
+            {
+                return Task.CompletedTask;
+            }
+        }
+
         if (e.Type == AgentEventType.ToolStarted)
         {
             // Resumen "Id started." + args en PayloadJson (lo pone el ejecutor).
@@ -1023,6 +1181,13 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
         if (e.Type == AgentEventType.StateChanged)
         {
+            var summary = e.Summary ?? string.Empty;
+            if (summary.Contains("Completed") || summary.Contains("Failed")
+                || summary.Contains("Cancelled"))
+            {
+                SetPaused(false); // terminal: no hay nada que reanudar
+            }
+
             var to = ParseStateTo(e.Summary);
             var activity = AgentActivityText.ForState(to);
             if (activity is not null)
@@ -1041,9 +1206,9 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             AgentEventType.StateChanged when (e.Summary ?? string.Empty).Contains("Failed") =>
                 ClearAnd("La ejecución falló. Mira la pestaña Salida para el detalle."),
             AgentEventType.StateChanged when (e.Summary ?? string.Empty).Contains("Cancelled") =>
-                ClearAnd("Ejecución cancelada."),
+                ClearAnd("Ejecución cancelada. Puedes darme otra instrucción cuando quieras."),
             AgentEventType.StateChanged when (e.Summary ?? string.Empty).Contains("Paused") =>
-                ClearAnd("Ejecución en pausa."),
+                ClearAnd("Ejecución en pausa. Pulsa Reanudar para continuar, o escribe una instrucción y Envía (se descarta lo pausado)."),
             _ => null,
         };
         if (text is not null)

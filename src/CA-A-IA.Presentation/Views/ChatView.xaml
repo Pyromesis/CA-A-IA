@@ -183,11 +183,12 @@
             </ListView.ItemContainerTransitions>
         </ListView>
 
-        <!-- Actividad del agente -->
+        <!-- Actividad del agente + controles ⏸/▶/⏹ -->
         <Grid Grid.Row="2" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <ProgressRing Grid.Column="0" Width="16" Height="16"
@@ -197,7 +198,31 @@
                        AutomationProperties.LiveSetting="Polite"
                        Opacity="0.85" VerticalAlignment="Center" FontStyle="Italic"
                        Visibility="{x:Bind ViewModel.AgentStatusVisibility, Mode=OneWay}" />
-            <TextBlock Grid.Column="2" Text="{x:Bind ViewModel.ModelsStatus, Mode=OneWay}"
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6"
+                        VerticalAlignment="Center">
+                <Button Content="&#xE769;" FontFamily="Segoe MDL2 Assets"
+                        Command="{x:Bind ViewModel.PauseCommand}"
+                        Style="{StaticResource AppGhostButtonStyle}"
+                        AutomationProperties.Name="Pausar"
+                        ToolTipService.ToolTip="Pausar (reanodable)"
+                        Visibility="{x:Bind ViewModel.PauseButtonVisibility, Mode=OneWay}"
+                        Padding="8,4" MinWidth="0" />
+                <Button Content="&#xE768;" FontFamily="Segoe MDL2 Assets"
+                        Command="{x:Bind ViewModel.ResumeCommand}"
+                        Style="{StaticResource AppGhostButtonStyle}"
+                        AutomationProperties.Name="Reanudar"
+                        ToolTipService.ToolTip="Reanudar donde lo dejamos"
+                        Visibility="{x:Bind ViewModel.ResumeButtonVisibility, Mode=OneWay}"
+                        Padding="8,4" MinWidth="0" />
+                <Button Content="&#xE71A;" FontFamily="Segoe MDL2 Assets"
+                        Command="{x:Bind ViewModel.StopCommand}"
+                        Style="{StaticResource AppGhostButtonStyle}"
+                        AutomationProperties.Name="Detener"
+                        ToolTipService.ToolTip="Detener del todo"
+                        Visibility="{x:Bind ViewModel.StopButtonVisibility, Mode=OneWay}"
+                        Padding="8,4" MinWidth="0" />
+            </StackPanel>
+            <TextBlock Grid.Column="3" Text="{x:Bind ViewModel.ModelsStatus, Mode=OneWay}"
                        Opacity="0.65" FontSize="12" VerticalAlignment="Center" />
         </Grid>
 
