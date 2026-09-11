@@ -68,6 +68,21 @@ public partial class App : Microsoft.UI.Xaml.Application
             _window = Services.GetRequiredService<MainWindow>();
             _window.Closed += OnWindowClosed;
             _window.Activate();
+
+            // Actualizaciones: conecta el canal y busca en segundo plano (una vez).
+            // Si hay release nuevo, Ajustes lo mostrará para descargar e instalar.
+            try
+            {
+                var settings = Services.GetRequiredService<ViewModels.SettingsViewModel>();
+                settings.AttachUpdater(
+                    Services.GetRequiredService<Domain.Update.IAppUpdateService>(),
+                    Services.GetRequiredService<Func<MainWindow>>());
+                _ = settings.AutoCheckForUpdatesAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Update wiring failed: {ex.GetType().Name}");
+            }
         }
         catch (Exception ex)
         {

@@ -18,6 +18,28 @@
 
             <Border Style="{StaticResource CardPanelStyle}" Padding="14">
             <StackPanel Spacing="8">
+                <TextBlock Text="ACTUALIZACIONES" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
+                <TextBlock Text="{x:Bind ViewModel.AppVersionText, Mode=OneWay}"
+                           Style="{StaticResource CardTitleStyle}" FontSize="16" />
+                <TextBlock Text="{x:Bind ViewModel.UpdateStatus, Mode=OneWay}"
+                           Style="{StaticResource MutedBodyStyle}" FontSize="13" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Buscar actualizaciones"
+                            Command="{x:Bind ViewModel.CheckUpdatesCommand}"
+                            Style="{StaticResource AppGhostButtonStyle}" />
+                    <Button Content="Descargar e instalar"
+                            Command="{x:Bind ViewModel.DownloadAndInstallCommand}"
+                            Style="{StaticResource AppPrimaryButtonStyle}"
+                            IsEnabled="{x:Bind ViewModel.UpdateAvailable, Mode=OneWay}" />
+                </StackPanel>
+                <ProgressBar Minimum="0" Maximum="100"
+                             Value="{x:Bind ViewModel.UpdateProgress, Mode=OneWay}"
+                             Visibility="{x:Bind ViewModel.IsDownloadingUpdate, Mode=OneWay}" />
+            </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource CardPanelStyle}" Padding="14">
+            <StackPanel Spacing="8">
                 <TextBlock Text="OPENCODE ZEN" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
                 <TextBlock Text="OpenCode Zen" Style="{StaticResource CardTitleStyle}" FontSize="16" />
                 <TextBlock Text="Consigue tu key en opencode.ai/auth (los modelos gratis también la piden)."

@@ -86,6 +86,8 @@ Root: HKCU; Subkey: "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\CA
 
 [Run]
 Filename: "{app}\\{#MyAppExe}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Auto-actualización (/UPDATE=1): reabre la app también en silencioso.
+Filename: "{app}\\{#MyAppExe}"; Flags: nowait; Check: IsSelfUpdate
 
 [UninstallDelete]
 ; Los datos de usuario (%LocalAppData%\CA-A-IA: BD, ajustes, secretos) se
@@ -106,6 +108,10 @@ Type: files; Name: "{autodesktop}\\CA-I-AI.lnk"
 [Code]
 // Limpia la clave App Paths del nombre intermedio (otra subclave: el
 // uninsdeletekey nuevo no la tocaría).
+function IsSelfUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
 procedure DeleteObsoleteFiles(const Dir: string);
 var
   FindRec: TFindRec;

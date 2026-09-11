@@ -112,6 +112,15 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<Providers.Zen.OpenCodeZenProvider>();
         services.AddSingleton<IStartupTask, ProviderRegistrationTask>();
 
+        // Actualización automática desde GitHub Releases (firma CA: canal fijo).
+        services.AddSingleton<Domain.Update.IAppUpdateService>(sp =>
+            new Update.GitHubAppUpdater(
+                new HttpClient(new SocketsHttpHandler
+                {
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                }),
+                sp.GetRequiredService<ILogger<Update.GitHubAppUpdater>>()));
+
         // Hidrata ToolRegistry con las herramientas registradas en DI.
         services.AddSingleton<IStartupTask, ToolRegistrationTask>();
 
