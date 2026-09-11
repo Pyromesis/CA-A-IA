@@ -17,8 +17,8 @@
     <Company>CA</Company>
     <Product>CA-A-IA</Product>
     <Copyright>Copyright © CA</Copyright>
-    <AssemblyVersion>0.1.5.0</AssemblyVersion>
-    <Version>0.1.5</Version>
+    <AssemblyVersion>0.1.6.0</AssemblyVersion>
+    <Version>0.1.6</Version>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsTestProject)' == 'true'">

@@ -50,6 +50,7 @@ public static class InfrastructureServiceExtensions
 
         // Utilidades
         services.AddSingleton<Process.ProcessRunner>();
+        services.AddSingleton<Domain.Interaction.IUiAutomation, Process.UiAutomation>();
         services.AddSingleton<Domain.Process.ICommandRunner, Process.CommandRunnerAdapter>();
         services.AddSingleton<WorkspaceReader>();
         services.AddSingleton<IGitService, ProcessGitService>();
@@ -94,8 +95,20 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<ITool, Tools.EditFileTool>();
         services.AddSingleton<ITool, Tools.ExecuteCommandTool>();
         services.AddSingleton<ITool, Tools.SearchTextTool>();
+
         services.AddSingleton<ITool, Tools.SearchFilesTool>();
 
+        services.AddSingleton<ITool, Tools.GetScreenSizeTool>();
+
+        services.AddSingleton<ITool, Tools.MoveMouseTool>();
+
+        services.AddSingleton<ITool, Tools.ClickMouseTool>();
+
+        services.AddSingleton<ITool, Tools.ScrollMouseTool>();
+
+        services.AddSingleton<ITool, Tools.TypeTextTool>();
+
+        services.AddSingleton<ITool, Tools.PressKeyTool>();
         // Adaptadores de proveedor (auto-registro)
         services.AddSingleton<OpenCodeProvider>();
         services.AddSingleton<OpenRouterProvider>();

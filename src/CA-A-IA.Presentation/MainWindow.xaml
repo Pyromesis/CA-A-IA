@@ -30,6 +30,7 @@
             </NavigationView.PaneHeader>
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Chat" Tag="chat" Icon="Comment" />
+                <NavigationViewItem Content="Autonomía" Tag="autonomy" Icon="TouchPointer" />
                 <NavigationViewItem Content="Historial" Tag="history" Icon="Clock" />
                 <NavigationViewItem Content="Plan" Tag="plan" Icon="Document" />
                 <NavigationViewItem Content="Tareas" Tag="tasks" Icon="List" />

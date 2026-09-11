@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
     private static void WarmUpViewModels()
     {
         _ = App.Services.GetRequiredService<ChatViewModel>();
+        _ = App.Services.GetRequiredService<AutonomyViewModel>();
         _ = App.Services.GetRequiredService<HistoryViewModel>();
         _ = App.Services.GetRequiredService<PlanViewModel>();
         _ = App.Services.GetRequiredService<TasksViewModel>();
@@ -55,6 +56,7 @@ public sealed partial class MainWindow : Window
         object page = tag switch
         {
             "chat" => App.Services.GetRequiredService<ChatView>(),
+            "autonomy" => App.Services.GetRequiredService<AutonomyView>(),
             "history" => App.Services.GetRequiredService<HistoryView>(),
             "plan" => App.Services.GetRequiredService<PlanView>(),
             "tasks" => App.Services.GetRequiredService<TasksView>(),
@@ -67,6 +69,7 @@ public sealed partial class MainWindow : Window
         HeaderText.Text = tag switch
         {
             "chat" => "Chat",
+            "autonomy" => "Autonomía",
             "history" => "Historial",
             "plan" => "Plan",
             "tasks" => "Tareas",
@@ -78,6 +81,7 @@ public sealed partial class MainWindow : Window
         HeaderSub.Text = tag switch
         {
             "chat" => "Habla con tu agente",
+            "autonomy" => "Controla tu PC como lo harías tú",
             "history" => "Tus conversaciones guardadas",
             "plan" => "Revisa, pregunta y ejecuta",
             "tasks" => "El paso a paso del plan activo",

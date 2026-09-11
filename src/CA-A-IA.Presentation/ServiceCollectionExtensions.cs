@@ -19,6 +19,7 @@ public static class PresentationServiceExtensions
         // Los ViewModels son singleton: el estado (chat, plan, workspace) sobrevive al
         // cambio de pestaña. Las vistas siguen transient (se re-enlazan al mismo VM).
         services.AddSingleton<ChatViewModel>();
+        services.AddSingleton<AutonomyViewModel>();
         services.AddSingleton<HistoryViewModel>();
         services.AddSingleton<PlanViewModel>();
         services.AddSingleton<TasksViewModel>();
@@ -27,6 +28,7 @@ public static class PresentationServiceExtensions
         services.AddSingleton<SettingsViewModel>();
 
         services.AddTransient<ChatView>();
+        services.AddTransient<AutonomyView>();
         services.AddTransient<HistoryView>();
         services.AddTransient<PlanView>();
         services.AddTransient<TasksView>();

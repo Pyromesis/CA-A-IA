@@ -4,6 +4,7 @@ using CaAIA.Agent;
 using CaAIA.Application;
 using CaAIA.Application.Services;
 using CaAIA.Domain.AI;
+using CaAIA.Domain.Enums;
 using CaAIA.Domain.Persistence;
 using CaAIA.Domain.Tools;
 using CaAIA.Infrastructure;
@@ -58,7 +59,8 @@ public sealed class CompositionTests : IDisposable
         Assert.Contains("openrouter", ids);
 
         var tools = provider.GetRequiredService<IToolRegistry>();
-        Assert.Equal(7, tools.ListDefinitions().Count); // Read, List, Write, Edit, Execute, Search×2
+        Assert.Equal(13, tools.ListDefinitions().Count); // Read, List, Write, Edit, Execute, Search×2 + UI×6
+        Assert.Contains(tools.ListDefinitions(), d => d.RequiredPermissions.HasFlag(ToolPermission.ProcessControl));
 
         // OpenCode local: sin binario, indisponible con mensaje accionable (no vacío mudo);
         // con binario (p. ej. CLI instalado), responde al --version sin levantar servidor.

@@ -33,4 +33,6 @@ public enum ToolKind
     Git = 6,
     Process = 7,
     Documentation = 8,
+    /// <summary>Ratón y teclado reales (pestaña Autonomía).</summary>
+    UiAutomation = 9,
 }

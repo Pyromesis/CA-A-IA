@@ -24,8 +24,23 @@ public static class AgentActivityText
             "EditFile" => $"Editando {Short(Args(args, "path"))}…",
             "ExecuteCommand" => ForCommand(Args(args, "command"), Args(args, "args")),
             "OpenCode" => "Trabajando en OpenCode…",
+            "UiMoveMouse" => $"Moviendo el ratón a {Args(args, "x")},{Args(args, "y")}…",
+            "UiClick" => ClickLabel(args),
+            "UiScroll" => "Desplazando la rueda…",
+            "UiTypeText" => $"Escribiendo {Tail(Args(args, "text"), 40)}…",
+            "UiPressKey" => $"Pulsando {Args(args, "key")}…",
+            "UiGetScreen" => "Mirando la pantalla…",
             _ => $"Ejecutando {toolId}…",
         };
+    }
+
+    private static string ClickLabel(Dictionary<string, string> args)
+    {
+        var button = Args(args, "button");
+        var where = !string.IsNullOrWhiteSpace(Args(args, "x")) ? $" en {Args(args, "x")},{Args(args, "y")}" : string.Empty;
+        var dbl = Args(args, "double");
+        var kind = dbl.Equals("true", StringComparison.OrdinalIgnoreCase) ? "Doble clic" : "Clic";
+        return string.IsNullOrWhiteSpace(button) ? $"{kind}{where}…" : $"{kind} {button}{where}…";
     }
 
     /// <summary>
@@ -42,6 +57,9 @@ public static class AgentActivityText
                 "WriteFile" => $"escribir {Tail(Args(args, "path"))}",
                 "EditFile" => $"editar {Tail(Args(args, "path"))}",
                 "ExecuteCommand" => $"ejecutar {Tail(CommandLine(args))}",
+                "UiMoveMouse" or "UiClick" or "UiScroll" => "mover el ratón",
+                "UiTypeText" => "escribir texto",
+                "UiPressKey" => $"pulsar {Tail(Args(args, "key"))}",
                 _ => null,
             };
             return what is null ? null : $"⚠ No se pudo {what}: {Tail(error ?? string.Empty, 140)}";

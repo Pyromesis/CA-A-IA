@@ -15,8 +15,14 @@ scope permite (reducción de superficie de ataque por construcción, no solo por
 Implementadas y testeadas: `ReadFile` y `ListDirectory` (solo lectura), más **`WriteFile`**
 (exige directorio padre existente, tope 500k chars), **`EditFile`** (reemplazo exacto de 1
 ocurrencia; 0 o 2+ → fallo sin tocar nada) y **`ExecuteCommand`** (`command` + `args` +
-`workdir` obligatorio dentro del scope, sin shell, timeout 5–1800 s, salida truncada a 20k,
-exit≠0 → `ToolFailure` con la salida como evidencia).
+`workdir` obligatorio dentro del scope, sin shell, timeout 5–300 s acotado por el ejecutor,
+salida truncada a 20k, exit≠0 → `ToolFailure` con la salida como evidencia).
+
+**Automatización UI** (pestaña Autonomía, `ToolKind.UiAutomation`, permiso
+`ProcessControl`): `UiGetScreen`, `UiMoveMouse` (humanizado: easing + jitter +
+dwell), `UiClick` (con movimiento previo opcional), `UiScroll`, `UiTypeText`
+(ritmo humano, tope 2000) y `UiPressKey` (nombres + modificadores). Sin Nivel 2
+(sin control del PC); Nivel 1 confirma cada acción.
 
 ## 3. Permisos (`Infrastructure/Security/ToolPermissionService.cs`)
 

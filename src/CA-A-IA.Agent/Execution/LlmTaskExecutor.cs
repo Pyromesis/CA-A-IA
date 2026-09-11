@@ -266,19 +266,30 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         }
     }
 
-    private static string SystemPrompt(string workspace, IReadOnlyCollection<ToolDefinition> tools) =>
-        $"""
-        You are CA-A-IA, an autonomous coding agent working in the workspace:
-        {workspace}
+    private static string SystemPrompt(string workspace, IReadOnlyCollection<ToolDefinition> tools)
+    {
+        var autonomy = tools.Any(t => t.Kind == ToolKind.UiAutomation)
+            ? """
+              - You CAN also control the user's PC like a human: UiGetScreen first to learn
+              the resolution, then UiMoveMouse/UiClick/UiScroll/UiTypeText/UiPressKey.
+              - The mouse moves human-like by itself: just give target coordinates of real
+              visible elements (never guess blindly; read the screen size first).
+              - Files you create go inside the workspace with absolute paths.
+              """
+            : string.Empty;
+        return $"""
+            You are CA-A-IA, an autonomous coding agent working in the workspace:
+            {workspace}
 
-        Rules:
-        - Work ONLY inside the workspace using absolute paths. Never touch anything outside.
-        - Use the available tools ({tools.Count}: {string.Join(", ", tools.Select(t => t.Id))}) to inspect, edit, build and test. Do not guess file contents.
-        - For ExecuteCommand, always set workdir to the workspace path.
-        - Verify your work: build the project and run relevant tests before finishing.
-        - When the task is done, reply with a concise summary including: files changed, build result, test result, and how each acceptance criterion is met.
-        - If blocked by a permission denial, explain and stop that approach instead of retrying it.
-        """;
+            Rules:
+            - Work ONLY inside the workspace using absolute paths. Never touch anything outside.
+            - Use the available tools ({tools.Count}: {string.Join(", ", tools.Select(t => t.Id))}) to inspect, edit, build and test. Do not guess file contents.
+            - For ExecuteCommand, always set workdir to the workspace path.
+            {autonomy}- Verify your work: build the project and run relevant tests before finishing.
+            - When the task is done, reply with a concise summary including: files changed, build result, test result, and how each acceptance criterion is met.
+            - If blocked by a permission denial, explain and stop that approach instead of retrying it.
+            """;
+    }
 
     private static string TaskPrompt(AgentTask task, ProjectContext context)
     {

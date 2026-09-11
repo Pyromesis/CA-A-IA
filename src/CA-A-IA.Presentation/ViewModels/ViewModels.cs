@@ -476,6 +476,8 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _modelsCts;
     private int _sendGuard;
     private int _pendingPersists;
+    private readonly HashSet<Guid> _ownSessions = new();
+    private readonly object _ownSessionsLock = new();
 
     public ChatViewModel(
         ISessionCoordinator coordinator,
@@ -962,6 +964,10 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             var session = await _coordinator.StartSessionAsync(WorkspacePath, text, ct).ConfigureAwait(true);
             _status.SetSession(session);
             _sessions.CurrentSessionId = session.Id;
+            lock (_ownSessionsLock)
+            {
+                _ownSessions.Add(session.Id);
+            }
             var modelDisplay = _prefs.ModelId.Contains('/') ? _prefs.ModelId : $"{_prefs.ProviderId}/{_prefs.ModelId}";
             AddMessage(new ChatMessage(ChatRole.Agent,
                 $"Recibido. Preparo el plan en {WorkspacePath} con {modelDisplay}…",
@@ -1138,6 +1144,20 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>Narración del agente en el chat + línea de actividad en vivo.</summary>
     private Task OnAgentEventAsync(Domain.Events.AgentEvent e, CancellationToken ct)
     {
+        // Solo sesiones nacidas en ESTE chat (o eventos globales sin sesión):
+        // con Autonomía en paralelo y CurrentSessionId compartido, sin filtro
+        // cada pestaña narraría el trabajo de la otra.
+        if (e.Correlation?.SessionId is Guid sid)
+        {
+            lock (_ownSessionsLock)
+            {
+                if (!_ownSessions.Contains(sid))
+                {
+                    return Task.CompletedTask;
+                }
+            }
+        }
+
         // Pausa/stop propios: el flag gobierna los botones ⏸/▶/⏹.
         if (e.Type == AgentEventType.AgentPaused)
         {
