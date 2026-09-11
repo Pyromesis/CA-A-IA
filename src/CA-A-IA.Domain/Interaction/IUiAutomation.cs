@@ -7,6 +7,9 @@ namespace CaAIA.Domain.Interaction;
 /// <summary>Tamaño del monitor principal (el modelo necesita cotas para coordenadas).</summary>
 public sealed record ScreenSize(int Width, int Height);
 
+/// <summary>Ventana en primer plano: proceso + título (para verificar qué se abrió).</summary>
+public sealed record ActiveWindow(string ProcessName, string Title);
+
 /// <summary>
 /// Ratón y teclado reales del PC. Implementación en Infrastructure (SendInput).
 /// Todo es cancelable y acotado; las coordenadas se recortan a la pantalla.
@@ -20,4 +23,20 @@ public interface IUiAutomation
     Task ScrollAsync(int deltaX, int deltaY, CancellationToken cancellationToken);
     Task TypeTextAsync(string text, CancellationToken cancellationToken);
     Task PressKeyAsync(string key, IReadOnlyList<string> modifiers, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Abre una app por nombre (brave, notepad…): si ya corre, la trae al frente
+    /// en vez de duplicarla. Devuelve proceso + título para verificar.
+    /// </summary>
+    Task<ActiveWindow> OpenAppAsync(string name, CancellationToken cancellationToken);
+
+    /// <summary>Abre una URL (navegador por defecto o el indicado). Valida http(s).</summary>
+    Task OpenUrlAsync(string url, string? browser, CancellationToken cancellationToken);
+
+    /// <summary>Ventana en primer plano ahora mismo (ojos del agente).</summary>
+    ActiveWindow GetActiveWindow();
+
+    /// <summary>Espera hasta que el primer plano contenga el texto (proceso o
+    /// título) o se acabe el tiempo. Para sincronizar en vez de adivinar.</summary>
+    Task<bool> WaitForActiveWindowAsync(string text, int timeoutSeconds, CancellationToken cancellationToken);
 }

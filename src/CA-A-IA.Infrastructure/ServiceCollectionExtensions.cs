@@ -109,6 +109,14 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<ITool, Tools.TypeTextTool>();
 
         services.AddSingleton<ITool, Tools.PressKeyTool>();
+
+        services.AddSingleton<ITool, Tools.OpenAppTool>();
+
+        services.AddSingleton<ITool, Tools.OpenUrlTool>();
+
+        services.AddSingleton<ITool, Tools.GetActiveWindowTool>();
+
+        services.AddSingleton<ITool, Tools.WaitForActiveWindowTool>();
         // Adaptadores de proveedor (auto-registro)
         services.AddSingleton<OpenCodeProvider>();
         services.AddSingleton<OpenRouterProvider>();

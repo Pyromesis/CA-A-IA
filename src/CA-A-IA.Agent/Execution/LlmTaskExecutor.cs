@@ -274,6 +274,12 @@ public sealed class LlmTaskExecutor : ITaskExecutor
               the resolution, then UiMoveMouse/UiClick/UiScroll/UiTypeText/UiPressKey.
               - The mouse moves human-like by itself: just give target coordinates of real
               visible elements (never guess blindly; read the screen size first).
+              - PREFER reliable actions over blind coordinates: UiOpenApp opens (or focuses
+              if already open — never launch duplicates), UiOpenUrl opens pages directly,
+              UiActiveWindow tells you the foreground process+title to VERIFY each step,
+              UiWaitWindow waits for something to appear instead of guessing timing.
+              - After acting, VERIFY with UiActiveWindow: if the wrong app opened, close
+              it (Alt+F4 via UiPressKey) and correct course instead of piling clicks.
               - Files you create go inside the workspace with absolute paths.
               """
             : string.Empty;

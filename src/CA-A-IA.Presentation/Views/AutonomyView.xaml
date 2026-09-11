@@ -24,6 +24,8 @@
                     <TextBlock Text="AUTONOMÍA" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
                     <TextBlock Text="Controlo tu PC como lo harías tú: ratón, teclado y comandos."
                                TextWrapping="WrapWholeWords" Opacity="0.9" />
+                    <TextBlock Text="Atajos globales: Ctrl+J pausar · Ctrl+K reanudar (funcionan en cualquier app)."
+                               FontSize="11" Opacity="0.6" TextWrapping="WrapWholeWords" />
                     <TextBlock Text="{x:Bind ViewModel.WorkspacePath, Mode=OneWay}"
                                FontFamily="Consolas" FontSize="11" Opacity="0.65"
                                TextTrimming="CharacterEllipsis"

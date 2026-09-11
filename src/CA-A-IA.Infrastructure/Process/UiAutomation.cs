@@ -94,6 +94,29 @@ public sealed class UiAutomation : IUiAutomation
     [DllImport("user32.dll")]
     private static extern short VkKeyScan(char ch);
 
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowText(nint hWnd, System.Text.StringBuilder text, int maxCount);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(nint hWnd);
+
+    private const int SW_RESTORE = 9;
+
     public ScreenSize GetScreenSize() =>
         new(Math.Max(1, GetSystemMetrics(SM_CXSCREEN)), Math.Max(1, GetSystemMetrics(SM_CYSCREEN)));
 
@@ -120,7 +143,7 @@ public sealed class UiAutomation : IUiAutomation
             return;
         }
 
-        var steps = (int)Math.Clamp(distance / 8, 12, 120);
+        var steps = (int)Math.Clamp(distance / 10, 10, 100);
         for (var i = 1; i <= steps; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -135,11 +158,11 @@ public sealed class UiAutomation : IUiAutomation
             }
 
             SendAbsolute((int)Math.Round(px), (int)Math.Round(py), screen);
-            await Task.Delay(Random.Shared.Next(8, 17), ct).ConfigureAwait(false);
+            await Task.Delay(Random.Shared.Next(6, 13), ct).ConfigureAwait(false);
         }
 
         // Micro-pausa de "dwell" antes de actuar, como un humano que apunta.
-        await Task.Delay(Random.Shared.Next(60, 180), ct).ConfigureAwait(false);
+        await Task.Delay(Random.Shared.Next(40, 121), ct).ConfigureAwait(false);
     }
 
     /// <summary>Curva suave: arranca y frena despacio, rápido en medio.</summary>
@@ -160,11 +183,11 @@ public sealed class UiAutomation : IUiAutomation
         {
             ct.ThrowIfCancellationRequested();
             SendMouse(down, 0);
-            await Task.Delay(Random.Shared.Next(40, 110), ct).ConfigureAwait(false);
+            await Task.Delay(Random.Shared.Next(30, 81), ct).ConfigureAwait(false);
             SendMouse(up, 0);
             if (i + 1 < clicks)
             {
-                await Task.Delay(Random.Shared.Next(60, 130), ct).ConfigureAwait(false);
+                await Task.Delay(Random.Shared.Next(50, 111), ct).ConfigureAwait(false);
             }
         }
     }
@@ -189,7 +212,7 @@ public sealed class UiAutomation : IUiAutomation
 
     public async Task TypeTextAsync(string text, CancellationToken ct)
     {
-        // Ritmo humano: 25–95 ms por tecla + pausas de "pensar" ocasionales.
+        // Ritmo humano ágil: 15–60 ms por tecla + pausas de "pensar" ocasionales.
         var count = 0;
         foreach (var ch in text ?? string.Empty)
         {
@@ -200,11 +223,11 @@ public sealed class UiAutomation : IUiAutomation
             }
 
             SendUnicode(ch, keyUp: false);
-            await Task.Delay(Random.Shared.Next(15, 45), ct).ConfigureAwait(false);
+            await Task.Delay(Random.Shared.Next(10, 31), ct).ConfigureAwait(false);
             SendUnicode(ch, keyUp: true);
             count++;
-            await Task.Delay(Random.Shared.Next(25, 95)
-                + (Random.Shared.Next(100) < 5 ? Random.Shared.Next(250, 600) : 0), ct)
+            await Task.Delay(Random.Shared.Next(15, 61)
+                + (Random.Shared.Next(100) < 5 ? Random.Shared.Next(200, 451) : 0), ct)
                 .ConfigureAwait(false);
         }
     }
@@ -378,4 +401,285 @@ public sealed class UiAutomation : IUiAutomation
             throw new InvalidOperationException("SendInput was blocked (UIPI?) or failed.");
         }
     }
+
+    public async Task<ActiveWindow> OpenAppAsync(string name, CancellationToken ct)
+    {
+        var token = NormalizeAppName(name);
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new ArgumentException("App name is required.", nameof(name));
+        }
+
+        // ¿Ya está abierta? Traerla al frente en vez de duplicarla.
+        var running = FindProcess(token);
+        if (running is not null)
+        {
+            var focused = FocusWindow(running);
+            running.Dispose();
+            return focused;
+        }
+
+        System.Diagnostics.Process process;
+        try
+        {
+            process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = LaunchToken(token),
+                UseShellExecute = true,
+            }) ?? throw new InvalidOperationException($"Could not launch '{name}'.");
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            throw new InvalidOperationException($"Could not launch '{name}': {ex.Message}", ex);
+        }
+
+        using (process)
+        {
+            // Esperar ventana principal (hasta 10 s): sin ventana no hay nada que ver.
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    process.Refresh();
+                    if (process.HasExited)
+                    {
+                        break;
+                    }
+
+                    if (process.MainWindowHandle != nint.Zero)
+                    {
+                        return FocusWindow(process);
+                    }
+                }
+                catch (Exception)
+                {
+                    break;
+                }
+
+                await Task.Delay(400, ct).ConfigureAwait(false);
+            }
+
+            try
+            {
+                return new ActiveWindow(process.ProcessName, process.MainWindowTitle);
+            }
+            catch (Exception)
+            {
+                return new ActiveWindow(token, string.Empty);
+            }
+        }
+    }
+
+    public Task OpenUrlAsync(string url, string? browser, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("URL must be absolute http(s).", nameof(url));
+        }
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(browser))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+                {
+                    UseShellExecute = true,
+                });
+            }
+            else
+            {
+                var exe = NormalizeAppName(browser);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(LaunchToken(exe), url)
+                {
+                    UseShellExecute = true,
+                });
+            }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            throw new InvalidOperationException($"Could not open URL: {ex.Message}", ex);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public ActiveWindow GetActiveWindow()
+    {
+        var hwnd = GetForegroundWindow();
+        if (hwnd == nint.Zero)
+        {
+            return new ActiveWindow(string.Empty, string.Empty);
+        }
+
+        GetWindowThreadProcessId(hwnd, out var pid);
+        string processName;
+        string title = WindowTitle(hwnd);
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById((int)pid);
+            processName = process.ProcessName;
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                try
+                {
+                    title = process.MainWindowTitle;
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+        catch (Exception)
+        {
+            processName = string.Empty;
+        }
+
+        return new ActiveWindow(processName, title);
+    }
+
+    public async Task<bool> WaitForActiveWindowAsync(string text, int timeoutSeconds, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new ArgumentException("Text is required.", nameof(text));
+        }
+
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds <= 0 ? 15 : timeoutSeconds, 3, 60));
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            var active = GetActiveWindow();
+            if (active.ProcessName.Contains(text, StringComparison.OrdinalIgnoreCase)
+                || active.Title.Contains(text, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            await Task.Delay(500, ct).ConfigureAwait(false);
+        }
+
+        return false;
+    }
+
+    private static System.Diagnostics.Process? FindProcess(string token)
+    {
+        try
+        {
+            return System.Diagnostics.Process.GetProcesses()
+                .FirstOrDefault(p =>
+                {
+                    string name;
+                    try
+                    {
+                        name = p.ProcessName;
+                    }
+                    catch (Exception)
+                    {
+                        p.Dispose();
+                        return false;
+                    }
+
+                    if (!name.Equals(token, StringComparison.OrdinalIgnoreCase)
+                        && !name.Contains(token, StringComparison.OrdinalIgnoreCase))
+                    {
+                        p.Dispose();
+                        return false;
+                    }
+
+                    return true;
+                });
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static ActiveWindow FocusWindow(System.Diagnostics.Process process)
+    {
+        try
+        {
+            var hwnd = process.MainWindowHandle;
+            if (hwnd == nint.Zero)
+            {
+                return new ActiveWindow(process.ProcessName, string.Empty);
+            }
+
+            try
+            {
+                if (IsIconic(hwnd))
+                {
+                    ShowWindow(hwnd, SW_RESTORE);
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            try
+            {
+                SetForegroundWindow(hwnd);
+            }
+            catch (Exception)
+            {
+            }
+
+            return new ActiveWindow(process.ProcessName, process.MainWindowTitle);
+        }
+        catch (Exception)
+        {
+            try
+            {
+                return new ActiveWindow(process.ProcessName, string.Empty);
+            }
+            catch (Exception)
+            {
+                return new ActiveWindow(string.Empty, string.Empty);
+            }
+        }
+    }
+
+    private static string WindowTitle(nint hwnd)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder(512);
+            return GetWindowText(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : string.Empty;
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string NormalizeAppName(string? name)
+    {
+        var token = (name ?? string.Empty).Trim().ToLowerInvariant();
+        if (token.EndsWith(".exe", StringComparison.Ordinal))
+        {
+            token = token[..^".exe".Length];
+        }
+
+        return token switch
+        {
+            "edge" or "microsoft edge" => "msedge",
+            "explorador" or "archivos" or "files" or "file explorer" => "explorer",
+            "calculadora" or "calculator" => "calc",
+            "bloc" or "notepad" => "notepad",
+            "terminal" or "consola" => "wt",
+            "navegador" or "browser" => "msedge",
+            _ => token,
+        };
+    }
+
+    private static string LaunchToken(string token) => token switch
+    {
+        "wt" => "wt.exe",
+        _ => token,
+    };
 }

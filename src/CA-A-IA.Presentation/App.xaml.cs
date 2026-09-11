@@ -17,6 +17,7 @@ public partial class App : Microsoft.UI.Xaml.Application
 {
     private IHost? _host;
     private Window? _window;
+    private Infrastructure.Process.GlobalHotkeys? _hotkeys;
 
     /// <summary>Contenedor raíz (Composition Root). Las Views lo usan para resolver páginas/VMs.</summary>
     public static IServiceProvider Services { get; private set; } = null!;
@@ -69,6 +70,24 @@ public partial class App : Microsoft.UI.Xaml.Application
             _window.Closed += OnWindowClosed;
             _window.Activate();
 
+            // Atajos globales: Ctrl+J pausa y Ctrl+K reanuda estén donde estén
+            // (funcionan hasta con otra app al frente). Si el sistema los deniega,
+            // la app sigue igual: los botones del Chat hacen lo mismo.
+            try
+            {
+                _hotkeys = new Infrastructure.Process.GlobalHotkeys();
+                if (!_hotkeys.Start(PauseFromHotkeyAsync, ResumeFromHotkeyAsync))
+                {
+                    _hotkeys.Dispose();
+                    _hotkeys = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Hotkeys unavailable: {ex.GetType().Name}");
+                _hotkeys = null;
+            }
+
             // Actualizaciones: conecta el canal y busca en segundo plano (una vez).
             // Si hay release nuevo, Ajustes lo mostrará para descargar e instalar.
             try
@@ -99,6 +118,15 @@ public partial class App : Microsoft.UI.Xaml.Application
     /// </summary>
     private async void OnWindowClosed(object sender, Microsoft.UI.Xaml.WindowEventArgs args)
     {
+        try
+        {
+            _hotkeys?.Dispose();
+            _hotkeys = null;
+        }
+        catch (Exception)
+        {
+        }
+
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
@@ -143,6 +171,66 @@ public partial class App : Microsoft.UI.Xaml.Application
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Shutdown flush failed: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>Ctrl+J global: pausa lo que esté corriendo (Chat y Autonomía).</summary>
+    private static async Task PauseFromHotkeyAsync()
+    {
+        try
+        {
+            var chat = Services.GetRequiredService<ViewModels.ChatViewModel>();
+            if (chat.PauseCommand.CanExecute(null))
+            {
+                await chat.PauseCommand.ExecuteAsync(null).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Hotkey pause failed: {ex.GetType().Name}");
+        }
+
+        try
+        {
+            var autonomy = Services.GetRequiredService<ViewModels.AutonomyViewModel>();
+            if (autonomy.PauseCommand.CanExecute(null))
+            {
+                await autonomy.PauseCommand.ExecuteAsync(null).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Hotkey pause (autonomy) failed: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>Ctrl+K global: reanuda donde se pausó.</summary>
+    private static async Task ResumeFromHotkeyAsync()
+    {
+        try
+        {
+            var chat = Services.GetRequiredService<ViewModels.ChatViewModel>();
+            if (chat.ResumeCommand.CanExecute(null))
+            {
+                await chat.ResumeCommand.ExecuteAsync(null).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Hotkey resume failed: {ex.GetType().Name}");
+        }
+
+        try
+        {
+            var autonomy = Services.GetRequiredService<ViewModels.AutonomyViewModel>();
+            if (autonomy.ResumeCommand.CanExecute(null))
+            {
+                await autonomy.ResumeCommand.ExecuteAsync(null).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Hotkey resume (autonomy) failed: {ex.GetType().Name}");
         }
     }
 }

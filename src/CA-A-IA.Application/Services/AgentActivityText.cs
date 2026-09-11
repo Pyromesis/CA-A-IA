@@ -30,6 +30,10 @@ public static class AgentActivityText
             "UiTypeText" => $"Escribiendo {Tail(Args(args, "text"), 40)}…",
             "UiPressKey" => $"Pulsando {Args(args, "key")}…",
             "UiGetScreen" => "Mirando la pantalla…",
+            "UiOpenApp" => $"Abriendo {Args(args, "name")}…",
+            "UiOpenUrl" => $"Abriendo {Tail(Args(args, "url"), 60)}…",
+            "UiActiveWindow" => "Mirando qué ventana está al frente…",
+            "UiWaitWindow" => $"Esperando '{Args(args, "text")}'…",
             _ => $"Ejecutando {toolId}…",
         };
     }
@@ -60,6 +64,8 @@ public static class AgentActivityText
                 "UiMoveMouse" or "UiClick" or "UiScroll" => "mover el ratón",
                 "UiTypeText" => "escribir texto",
                 "UiPressKey" => $"pulsar {Tail(Args(args, "key"))}",
+                "UiOpenApp" => $"abrir {Tail(Args(args, "name"))}",
+                "UiOpenUrl" => "abrir la URL",
                 _ => null,
             };
             return what is null ? null : $"⚠ No se pudo {what}: {Tail(error ?? string.Empty, 140)}";
@@ -70,6 +76,8 @@ public static class AgentActivityText
             "WriteFile" => $"✎ Escribió {Tail(Args(args, "path"))}",
             "EditFile" => $"✎ Editó {Tail(Args(args, "path"))}",
             "ExecuteCommand" => $"▶ Ejecutó {Tail(CommandLine(args))}",
+            "UiOpenApp" => $"▶ Abrió {Tail(Args(args, "name"))}",
+            "UiOpenUrl" => $"▶ Abrió {Tail(Args(args, "url"), 80)}",
             _ => null,
         };
     }

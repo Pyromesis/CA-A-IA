@@ -1,5 +1,6 @@
 // CA-A-IA — Tests de herramientas de autonomía (parseo, cotas, permisos).
 
+using CaAIA.Application.Services;
 using CaAIA.Domain.Enums;
 using CaAIA.Domain.Interaction;
 using CaAIA.Domain.Tools;
@@ -45,6 +46,26 @@ public sealed class UiAutomationToolsTests
             Calls.Add($"key:{key}+{string.Join("+", modifiers)}");
             return Task.CompletedTask;
         }
+
+        public Task<ActiveWindow> OpenAppAsync(string name, CancellationToken ct)
+        {
+            Calls.Add($"open:{name}");
+            return Task.FromResult(new ActiveWindow("brave", "Brave"));
+        }
+
+        public Task OpenUrlAsync(string url, string? browser, CancellationToken ct)
+        {
+            Calls.Add($"url:{url},{browser}");
+            return Task.CompletedTask;
+        }
+
+        public ActiveWindow GetActiveWindow() => new("brave", "YouTube — Brave");
+
+        public Task<bool> WaitForActiveWindowAsync(string text, int timeoutSeconds, CancellationToken ct)
+        {
+            Calls.Add($"wait:{text}");
+            return Task.FromResult(true);
+        }
     }
 
     private static ToolInvocation Invoke(string toolId, string args) =>
@@ -59,6 +80,8 @@ public sealed class UiAutomationToolsTests
             new GetScreenSizeTool(new FakeUi()), new MoveMouseTool(new FakeUi()),
             new ClickMouseTool(new FakeUi()), new ScrollMouseTool(new FakeUi()),
             new TypeTextTool(new FakeUi()), new PressKeyTool(new FakeUi()),
+            new OpenAppTool(new FakeUi()), new OpenUrlTool(new FakeUi()),
+            new GetActiveWindowTool(new FakeUi()), new WaitForActiveWindowTool(new FakeUi()),
         };
         Assert.All(tools, t =>
         {
@@ -129,6 +152,53 @@ public sealed class UiAutomationToolsTests
         Assert.True(result.Success);
         Assert.Equal("1920x1080", result.Output);
     }
+
+    [Fact]
+    public async Task OpenApp_OpensAndReports()
+    {
+        var ui = new FakeUi();
+        var ok = await new OpenAppTool(ui).ExecuteAsync(
+            Invoke(OpenAppTool.ToolId, """{"name":"brave"}"""), CancellationToken.None);
+        Assert.True(ok.Success, ok.Error);
+        Assert.Contains("brave", ok.Output, StringComparison.OrdinalIgnoreCase);
+        var missing = await new OpenAppTool(ui).ExecuteAsync(
+            Invoke(OpenAppTool.ToolId, "{}"), CancellationToken.None);
+        Assert.False(missing.Success);
+    }
+
+    [Fact]
+    public async Task OpenUrl_RequiresHttp()
+    {
+        var ui = new FakeUi();
+        var ok = await new OpenUrlTool(ui).ExecuteAsync(
+            Invoke(OpenUrlTool.ToolId, """{"url":"https://youtube.com"}"""), CancellationToken.None);
+        Assert.True(ok.Success, ok.Error);
+    }
+
+    [Fact]
+    public async Task ActiveWindow_ReportsForeground()
+    {
+        var result = await new GetActiveWindowTool(new FakeUi()).ExecuteAsync(
+            Invoke(GetActiveWindowTool.ToolId, "{}"), CancellationToken.None);
+        Assert.True(result.Success);
+        Assert.Contains("YouTube", result.Output);
+    }
+
+    [Fact]
+    public async Task WaitWindow_Waits()
+    {
+        var ui = new FakeUi();
+        var result = await new WaitForActiveWindowTool(ui).ExecuteAsync(
+            Invoke(WaitForActiveWindowTool.ToolId, """{"text":"youtube"}"""), CancellationToken.None);
+        Assert.True(result.Success, result.Error);
+        Assert.Contains("wait:youtube", ui.Calls);
+    }
+
+    [Theory]
+    [InlineData("UiOpenApp", "{\"name\":\"x\"}", "▶ Abrió x")]
+    [InlineData("UiOpenUrl", "{\"url\":\"https://youtube.com/abc\"}", "▶ Abrió https://youtube.com/abc")]
+    public void ForToolCompleted_NarratesUiActions(string toolId, string args, string expected) =>
+        Assert.Equal(expected, AgentActivityText.ForToolCompleted(toolId, args, true, null));
 
     [Theory]
     [InlineData(0.0, 0.0)]

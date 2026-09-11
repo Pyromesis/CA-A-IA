@@ -227,6 +227,173 @@ public sealed class TypeTextTool : ITool
     }
 }
 
+/// <summary>Abre una app por nombre (o la trae al frente si ya corre). { "name" }.</summary>
+public sealed class OpenAppTool : ITool
+{
+    public const string ToolId = "UiOpenApp";
+    public ToolDefinition Definition { get; } = new(
+        ToolId, "UiOpenApp", "Opens an app by name (brave, notepad…); focuses it if already running instead of duplicating.",
+        ToolKind.UiAutomation, ToolPermission.ProcessControl,
+        new[] { new ToolParameter("name", "App name.", "string", IsRequired: true) },
+        TimeSpan.FromSeconds(30));
+
+    private readonly IUiAutomation _ui;
+    public OpenAppTool(IUiAutomation ui) => _ui = ui;
+
+    public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var doc = JsonDocument.Parse(invocation.ArgumentsJson);
+            var name = WriteFileTool.Required(doc, "name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return WriteFileTool.Fail(invocation, "Missing required argument 'name'.", sw);
+            }
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(invocation.TimeoutOverride ?? Definition.DefaultTimeout);
+            var active = await _ui.OpenAppAsync(name, timeout.Token).ConfigureAwait(false);
+            var detail = string.IsNullOrWhiteSpace(active.Title)
+                ? active.ProcessName : $"{active.ProcessName} — {active.Title}";
+            return WriteFileTool.Ok(invocation, $"Open: {detail}.", sw);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return WriteFileTool.Fail(invocation, "UiOpenApp timed out.", sw);
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
+        {
+            return WriteFileTool.Fail(invocation, ex.Message, sw);
+        }
+    }
+}
+
+/// <summary>Abre una URL (navegador por defecto o indicado). { "url", "browser"? }.</summary>
+public sealed class OpenUrlTool : ITool
+{
+    public const string ToolId = "UiOpenUrl";
+    public ToolDefinition Definition { get; } = new(
+        ToolId, "UiOpenUrl", "Opens an http(s) URL in the default (or given) browser.",
+        ToolKind.UiAutomation, ToolPermission.ProcessControl,
+        new[]
+        {
+            new ToolParameter("url", "Absolute http(s) URL.", "string", IsRequired: true),
+            new ToolParameter("browser", "brave|chrome|edge|firefox… (default browser if empty).", "string", IsRequired: false),
+        },
+        TimeSpan.FromSeconds(30));
+
+    private readonly IUiAutomation _ui;
+    public OpenUrlTool(IUiAutomation ui) => _ui = ui;
+
+    public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var doc = JsonDocument.Parse(invocation.ArgumentsJson);
+            var url = WriteFileTool.Required(doc, "url");
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return WriteFileTool.Fail(invocation, "Missing required argument 'url'.", sw);
+            }
+
+            var browser = doc.RootElement.TryGetProperty("browser", out var b)
+                && b.ValueKind == JsonValueKind.String ? b.GetString() : null;
+            await _ui.OpenUrlAsync(url, browser, cancellationToken).ConfigureAwait(false);
+            return WriteFileTool.Ok(invocation, $"Opened {url}.", sw);
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
+        {
+            return WriteFileTool.Fail(invocation, ex.Message, sw);
+        }
+    }
+}
+
+/// <summary>Ventana en primer plano (proceso + título). Sin argumentos.</summary>
+public sealed class GetActiveWindowTool : ITool
+{
+    public const string ToolId = "UiActiveWindow";
+    public ToolDefinition Definition { get; } = new(
+        ToolId, "UiActiveWindow", "Gets the foreground window (process + title) to verify what is open.",
+        ToolKind.UiAutomation, ToolPermission.ProcessControl,
+        Array.Empty<ToolParameter>(), TimeSpan.FromSeconds(10));
+
+    private readonly IUiAutomation _ui;
+    public GetActiveWindowTool(IUiAutomation ui) => _ui = ui;
+
+    public Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var active = _ui.GetActiveWindow();
+            var detail = string.IsNullOrWhiteSpace(active.Title)
+                ? active.ProcessName : $"{active.ProcessName} — {active.Title}";
+            return Task.FromResult(string.IsNullOrWhiteSpace(detail)
+                ? WriteFileTool.Fail(invocation, "No foreground window.", sw)
+                : WriteFileTool.Ok(invocation, detail, sw));
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult(WriteFileTool.Fail(invocation, ex.Message, sw));
+        }
+    }
+}
+
+/// <summary>Espera a que el primer plano contenga un texto. { "text", "timeoutSeconds"? }.</summary>
+public sealed class WaitForActiveWindowTool : ITool
+{
+    public const string ToolId = "UiWaitWindow";
+    public ToolDefinition Definition { get; } = new(
+        ToolId, "UiWaitWindow", "Waits until the foreground window contains text (process or title) instead of guessing blindly.",
+        ToolKind.UiAutomation, ToolPermission.ProcessControl,
+        new[]
+        {
+            new ToolParameter("text", "Text to wait for.", "string", IsRequired: true),
+            new ToolParameter("timeoutSeconds", "Timeout 3-60 (default 15).", "integer", IsRequired: false, DefaultJson: "15"),
+        },
+        TimeSpan.FromSeconds(70));
+
+    private readonly IUiAutomation _ui;
+    public WaitForActiveWindowTool(IUiAutomation ui) => _ui = ui;
+
+    public async Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var doc = JsonDocument.Parse(invocation.ArgumentsJson);
+            var text = WriteFileTool.Required(doc, "text");
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return WriteFileTool.Fail(invocation, "Missing required argument 'text'.", sw);
+            }
+
+            var timeout = doc.RootElement.TryGetProperty("timeoutSeconds", out var t) && t.TryGetInt32(out var n)
+                ? n : 15;
+            var found = await _ui.WaitForActiveWindowAsync(text, timeout, cancellationToken).ConfigureAwait(false);
+            if (!found)
+            {
+                var now = _ui.GetActiveWindow();
+                return WriteFileTool.Fail(invocation,
+                    $"Timed out waiting for '{text}'. Foreground now: {now.ProcessName} — {now.Title}.", sw);
+            }
+
+            var active = _ui.GetActiveWindow();
+            return WriteFileTool.Ok(invocation, $"Foreground: {active.ProcessName} — {active.Title}.", sw);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return WriteFileTool.Fail(invocation, "UiWaitWindow timed out.", sw);
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
+        {
+            return WriteFileTool.Fail(invocation, ex.Message, sw);
+        }
+    }
+}
 /// <summary>Pulsa una tecla (Enter, Tab, Win, F5, letras…) + modificadores. { "key", "modifiers"? }.</summary>
 public sealed class PressKeyTool : ITool
 {
