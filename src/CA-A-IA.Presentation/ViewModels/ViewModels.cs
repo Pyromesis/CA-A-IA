@@ -215,6 +215,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private readonly Application.Services.IUserPreferences _prefs;
     private readonly Application.Services.ISessionContext _sessions;
     private readonly Domain.Persistence.IChatMessageStore _history;
+    private readonly Domain.Git.IGitService _git;
     private readonly DispatcherQueue _dispatcher;
     private readonly IDisposable _subscription;
     private readonly Diagnostics.UiFlightRecorder _flight; // TEMPORARY-DIAGNOSTIC
@@ -484,6 +485,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         Application.Services.ISessionContext sessions,
         Domain.Events.IEventBus events,
         Domain.Persistence.IChatMessageStore history,
+        Domain.Git.IGitService git,
         Diagnostics.UiFlightRecorder flight)
     {
         _coordinator = coordinator;
@@ -492,6 +494,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         _prefs = prefs;
         _sessions = sessions;
         _history = history;
+        _git = git;
         _flight = flight;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
 
@@ -1216,7 +1219,47 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             AddMessage(new ChatMessage(ChatRole.Agent, text, e.OccurredAt));
         }
 
+        // Al cerrar cada tarea: qué archivos tocó (git status, con tope).
+        if (e.Type is AgentEventType.TaskCompleted or AgentEventType.TaskFailed)
+        {
+            _ = NarrateChangesAsync(e.OccurredAt);
+        }
+
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Burbuja "📝 Cambios (N): …" tras cada tarea (fire-and-forget, nunca rompe).
+    /// Solo si el workspace es un repo git con cambios.
+    /// </summary>
+    private async Task NarrateChangesAsync(DateTimeOffset at)
+    {
+        try
+        {
+            var workspace = WorkspacePath;
+            if (string.IsNullOrWhiteSpace(workspace) || !Directory.Exists(workspace))
+            {
+                return;
+            }
+
+            if (!await _git.IsRepositoryAsync(workspace, CancellationToken.None).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            var status = await _git.GetStatusAsync(workspace, CancellationToken.None).ConfigureAwait(false);
+            var narrative = AgentActivityText.ForFileChanges(status.Changes);
+            if (narrative is null)
+            {
+                return;
+            }
+
+            AddMessage(new ChatMessage(ChatRole.Agent, narrative, at));
+        }
+        catch (Exception)
+        {
+            // El resumen de cambios es cortesía: jamás rompe el chat.
+        }
     }
 
     private string ClearAnd(string text)

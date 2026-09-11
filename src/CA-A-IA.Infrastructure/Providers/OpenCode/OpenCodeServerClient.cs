@@ -433,16 +433,95 @@ public sealed class OpenCodeServerClient
         }
 
         tool ??= name ?? type;
-        var title = Str(part, "title")
-            ?? Str(part, "file") ?? Str(part, "path") ?? Str(part, "filename")
-            ?? Str(part, "command") ?? Str(part, "pattern") ?? Str(part, "query")
-            ?? TryNestedStr(part, "input", "file") ?? TryNestedStr(part, "input", "path")
-            ?? TryNestedStr(part, "input", "command") ?? TryNestedStr(part, "input", "pattern")
-            ?? TryNestedStr(part, "state", "title") ?? string.Empty;
+        var title = ExtractToolTitle(part);
         var state = TryNestedStr(part, "state", "status")
             ?? Str(part, "status") ?? Str(part, "state") ?? string.Empty;
         var key = Str(part, "id") ?? Str(part, "partID") ?? Str(part, "partId") ?? fallbackKey;
         return new OpenCodeServerToolCall(key, tool.Trim(), title.Trim(), state.Trim().ToLowerInvariant());
+    }
+
+    /// <summary>
+    /// Título legible de la herramienta: recorre campos conocidos (planos y en
+    /// "input"/"state"), acepta "input" como texto directo y, como red, el primer
+    /// string corto de la part. Sin esto se veía "Ejecutando comando…" sin más.
+    /// </summary>
+    internal static string ExtractToolTitle(JsonElement part)
+    {
+        var direct = Str(part, "title")
+            ?? Str(part, "file") ?? Str(part, "path") ?? Str(part, "filename") ?? Str(part, "filepath")
+            ?? Str(part, "command") ?? Str(part, "cmd") ?? Str(part, "pattern") ?? Str(part, "query")
+            ?? Str(part, "directory") ?? Str(part, "description") ?? Str(part, "detail");
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return Truncate(direct, 140);
+        }
+
+        if (part.TryGetProperty("input", out var input))
+        {
+            if (input.ValueKind == JsonValueKind.String)
+            {
+                var text = input.GetString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    return Truncate(text, 140);
+                }
+            }
+            else if (input.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var name in new[]
+                    { "file", "path", "filepath", "filename", "command", "cmd", "pattern", "query",
+                      "directory", "title", "description", "text", "content", "edits", "question" })
+                {
+                    if (input.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String)
+                    {
+                        var text = v.GetString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            return Truncate(text, 140);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (part.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "title", "input", "command", "file", "path" })
+            {
+                if (state.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String)
+                {
+                    var text = v.GetString() ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return Truncate(text, 140);
+                    }
+                }
+            }
+        }
+
+        // Red: primer string corto que no sea id/type/tool/name/status.
+        if (part.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in part.EnumerateObject())
+            {
+                if (prop.Name is "id" or "partID" or "partId" or "type" or "tool" or "name"
+                    or "status" or "state" or "sessionID" or "messageID" or "messageId")
+                {
+                    continue;
+                }
+
+                if (prop.Value.ValueKind == JsonValueKind.String)
+                {
+                    var text = prop.Value.GetString() ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(text) && text.Length <= 140)
+                    {
+                        return text;
+                    }
+                }
+            }
+        }
+
+        return string.Empty;
     }
 
     private static bool IsKnownServerTool(string? name) =>

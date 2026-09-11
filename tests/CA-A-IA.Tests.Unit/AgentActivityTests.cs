@@ -1,6 +1,7 @@
 // CA-A-IA — Tests del mapeo evento→frase de actividad (feed en vivo del Chat).
 
 using CaAIA.Application.Services;
+using CaAIA.Domain.Git;
 
 namespace CaAIA.Tests.Unit;
 
@@ -53,4 +54,34 @@ public sealed class AgentActivityTests
     [InlineData("Idle", null)]
     public void ForState_MapsEngineStates(string? state, string? expected) =>
         Assert.Equal(expected, AgentActivityText.ForState(state));
+
+    [Fact]
+    public void ForFileChanges_Empty_ReturnsNull() =>
+        Assert.Null(AgentActivityText.ForFileChanges(Array.Empty<GitChange>()));
+
+    [Fact]
+    public void ForFileChanges_ListsFilesWithStatus()
+    {
+        var text = AgentActivityText.ForFileChanges(new[]
+        {
+            new GitChange(@"C:\w\Program.cs", "M"),
+            new GitChange(@"C:\w\new.txt", "??"),
+        });
+        Assert.NotNull(text);
+        Assert.Contains("2", text);
+        Assert.Contains("Program.cs", text);
+        Assert.Contains("new.txt", text);
+    }
+
+    [Fact]
+    public void ForFileChanges_TruncatesLongLists()
+    {
+        var changes = Enumerable.Range(0, 20)
+            .Select(i => new GitChange($"C:\\w\\f{i}.txt", "M"))
+            .ToList();
+        var text = AgentActivityText.ForFileChanges(changes);
+        Assert.NotNull(text);
+        Assert.Contains("+", text);
+        Assert.DoesNotContain("f19.txt", text);
+    }
 }

@@ -272,8 +272,10 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
             // Timeout de la operación (opTimeout), NO pausa/cancelación: antes se
             // relanzaba, escapaba de RunAsync y envenenaba el motor (sin estado
             // terminal y siguiente Run ilegal). Ahora es un fallo clasificable.
+            var minutes = Math.Max(1, _settings.OperationTimeoutSeconds / 60);
             outcome = new TaskExecutionOutcome(false,
-                $"Task exceeded operation timeout of {_settings.OperationTimeoutSeconds}s.",
+                $"La tarea superó el límite de {minutes} min sin terminar. " +
+                "Divídela en tareas más pequeñas o usa un modelo más rápido.",
                 FailureCategory.ToolFailure);
         }
         catch (OperationCanceledException)

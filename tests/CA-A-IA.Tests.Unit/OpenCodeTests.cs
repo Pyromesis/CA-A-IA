@@ -361,6 +361,18 @@ public sealed class OpenCodeTests
             && (e.Summary ?? string.Empty).StartsWith("ReadFile: ok", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("""{"type":"tool","tool":"bash","input":{"command":"dotnet build"}}""", "dotnet build")]
+    [InlineData("""{"type":"tool","tool":"read","input":"C:\\w\\a.txt"}""", "C:\\w\\a.txt")]
+    [InlineData("""{"type":"tool","tool":"edit","state":{"title":"otro"},"other":"zzz"}""", "otro")]
+    [InlineData("""{"type":"tool","tool":"read"}""", "")]
+    [InlineData("""{"type":"text","text":"hola"}""", "hola")]
+    public void ExtractToolTitle_CoversShapes(string json, string expected)
+    {
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(expected, OpenCodeServerClient.ExtractToolTitle(doc.RootElement));
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _fn;

@@ -295,9 +295,12 @@ public sealed class OpenCodeProvider : IAIProvider, IAsyncDisposable
             return; // ruido: el "Trabajando en OpenCode…" base ya está activo
         }
 
+        // Sin título extraíble, el nombre de la herramienta ("Ejecutando bash…")
+        // antes que el genérico vacío ("Ejecutando comando…").
+        var title = string.IsNullOrWhiteSpace(call.Title) ? call.Tool : call.Title;
         _events.Publish(Domain.Events.AgentEvent.Create(
             Domain.Enums.AgentEventType.ToolStarted, correlation,
-            $"{id} started.", ServerArgsJson(id, call.Title)));
+            $"{id} started.", ServerArgsJson(id, title)));
     }
 
     private void PublishServerToolCompleted(
@@ -316,11 +319,12 @@ public sealed class OpenCodeProvider : IAIProvider, IAsyncDisposable
             return;
         }
 
+        var title = string.IsNullOrWhiteSpace(call.Title) ? call.Tool : call.Title;
         var ok = !IsError(call.State);
         _events.Publish(Domain.Events.AgentEvent.Create(
             Domain.Enums.AgentEventType.ToolCompleted, correlation,
-            ok ? $"{id}: ok" : $"{id}: {call.Title}",
-            ServerArgsJson(id, call.Title)));
+            ok ? $"{id}: ok" : $"{id}: {title}",
+            ServerArgsJson(id, title)));
     }
 
     private static string ServerArgsJson(string mappedId, string title)

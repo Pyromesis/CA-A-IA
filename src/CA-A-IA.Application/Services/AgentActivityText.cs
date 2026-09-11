@@ -75,6 +75,51 @@ public static class AgentActivityText
         return "…" + text[^Math.Max(0, max - 1)..];
     }
 
+    /// <summary>
+    /// Resumen de lo que tocó una tarea (git status): "📝 Cambios (3): M a.cs, …".
+    /// Null si no hay cambios. Puro y testeable.
+    /// </summary>
+    public static string? ForFileChanges(
+        IReadOnlyList<Domain.Git.GitChange> changes, int maxFiles = 12)
+    {
+        if (changes is null || changes.Count == 0)
+        {
+            return null;
+        }
+
+        var names = changes
+            .Select(c => $"{(c.Status ?? string.Empty).Trim()} {TailName(c.Path)}".Trim())
+            .Where(s => s.Length > 0)
+            .Take(Math.Max(1, maxFiles))
+            .ToList();
+        if (names.Count == 0)
+        {
+            return null;
+        }
+
+        var more = changes.Count - names.Count;
+        return $"📝 Cambios ({changes.Count}): " + string.Join(", ", names)
+            + (more > 0 ? $" (+{more} más)" : string.Empty);
+    }
+
+    private static string TailName(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var name = Path.GetFileName(path.Trim());
+            return string.IsNullOrEmpty(name) ? path.Trim() : name;
+        }
+        catch (Exception)
+        {
+            return path;
+        }
+    }
+
     /// <summary>Frase para estados del motor (parte "To" de "From -> To: reason").</summary>
     public static string? ForState(string? toState) => toState switch
     {
