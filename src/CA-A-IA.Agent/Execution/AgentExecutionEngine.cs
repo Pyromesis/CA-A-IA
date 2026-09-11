@@ -213,51 +213,191 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
         return CheckpointAsync("cancelled");
     }
 
-    // ---- Bucle principal ----
+    // ---- Bucle principal (multi-agente: tareas listas en paralelo) ----
+
+    private readonly object _planLock = new();
+    private readonly object _evidenceLock = new();
 
     private async Task MainLoopAsync(Plan plan, CancellationToken ct)
     {
-        while (true)
+        var maxWorkers = Math.Clamp(_settings.MaxParallelAgents, 1, 8);
+        using var gate = new SemaphoreSlim(maxWorkers, maxWorkers);
+        var running = new List<Task>();
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            var statuses = plan.Tasks.ToDictionary(t => t.Id, t => t.Status);
-
-            var next = plan.Tasks.FirstOrDefault(t => t.IsReady(statuses));
-            if (next is null)
+            while (true)
             {
-                if (plan.AllTasksClosed())
-                {
-                    await FinalAuditAsync(plan, ct).ConfigureAwait(false);
-                    // Solo se sigue si la auditoría amplió el plan (termina en
-                    // AdvancingTask): Completed/Failed/Cancelled salen del bucle.
-                    // Antes solo se miraba Completed y tras un Fail se reintentaba
-                    // auditar desde Failed (transición ilegal).
-                    if (_machine.Current != AgentState.AdvancingTask)
-                    {
-                        return;
-                    }
+                ct.ThrowIfCancellationRequested();
 
-                    continue;
+                // Reclamar todo lo listo (atómico: snapshot + IsReady + MarkStarted).
+                while (TryClaimNext(plan, out var claimed) && claimed is not null)
+                {
+                    await gate.WaitAsync(ct).ConfigureAwait(false);
+                    running.Add(RunTaskAsync(plan, claimed, gate, ct));
                 }
 
-                await FailAsync(plan, "No ready tasks but plan is not closed (dependency deadlock).", ct)
-                    .ConfigureAwait(false);
-                return;
-            }
+                // Drenar terminadas observando excepciones (la cancelación sí propaga).
+                for (var i = running.Count - 1; i >= 0; i--)
+                {
+                    if (!running[i].IsCompleted)
+                    {
+                        continue;
+                    }
 
-            await ExecuteOneAsync(plan, next, ct).ConfigureAwait(false);
+                    var done = running[i];
+                    running.RemoveAt(i);
+                    try
+                    {
+                        await done.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // No debería pasar (el worker clasifica todo): no tumbar el resto.
+                        _log.LogError(ex, "Worker task faulted unexpectedly.");
+                    }
+                }
+
+                if (running.Count == 0)
+                {
+                    bool closed;
+                    lock (_planLock)
+                    {
+                        closed = plan.AllTasksClosed();
+                    }
+
+                    if (closed)
+                    {
+                        await FinalAuditAsync(plan, ct).ConfigureAwait(false);
+                        // Solo se sigue si la auditoría amplió el plan (termina en
+                        // AdvancingTask): Completed/Failed/Cancelled salen del bucle.
+                        if (_machine.Current != AgentState.AdvancingTask)
+                        {
+                            return;
+                        }
+
+                        continue;
+                    }
+
+                    await FailAsync(plan, "No ready tasks but plan is not closed (dependency deadlock).", ct)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                // Hay trabajo en vuelo pero nada reclamable: esperar a que alguna
+                // avance (desbloquea dependientes o libera hueco).
+                await Task.WhenAny(running).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            // Al salir por cancelación, esperar a los workers (comparten el token).
+            if (running.Count > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(running).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // Ya observado arriba o cancelación en curso.
+                }
+            }
         }
     }
 
-    private async Task ExecuteOneAsync(Plan plan, AgentTask task, CancellationToken ct)
+    /// <summary>Reclama la siguiente tarea lista (o null). Atómico bajo lock.</summary>
+    private bool TryClaimNext(Plan plan, out AgentTask? task)
     {
-        _currentTaskId = task.Id;
-        task.MarkStarted();
-        await _plans.SaveAsync(plan, ct).ConfigureAwait(false);
+        lock (_planLock)
+        {
+            var statuses = plan.Tasks.ToDictionary(t => t.Id, t => t.Status);
+            task = plan.Tasks.FirstOrDefault(t => t.IsReady(statuses));
+            if (task is null)
+            {
+                return false;
+            }
 
-        await Go(AgentState.Executing, $"task '{task.Title}'", ct).ConfigureAwait(false);
-        _events.Publish(AgentEvent.Create(AgentEventType.TaskStarted, _correlation, task.Title));
+            task.MarkStarted();
+            return true;
+        }
+    }
 
+    /// <summary>Transición de ciclo de tarea: estricta en mono-agente; tolerante en
+    /// paralelo (los workers entrelazan Executing/Testing/… y la máquina es un
+    /// indicador global aproximado; los estados terminales siempre son estrictos).</summary>
+    private async Task GoTaskAsync(AgentState next, string reason, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (Math.Clamp(_settings.MaxParallelAgents, 1, 8) <= 1)
+        {
+            await Go(next, reason, ct).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            _machine.TransitionTo(next, reason);
+            TouchProgress();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _log.LogDebug(ex, "Parallel transition skipped {From}->{To}", _machine.Current, next);
+        }
+
+        await CheckpointAsync(reason).ConfigureAwait(false);
+    }
+
+    /// <summary>Worker de una tarea reclamada: ejecuta + repara + libera el hueco.</summary>
+    private async Task RunTaskAsync(Plan plan, AgentTask task, SemaphoreSlim gate, CancellationToken ct)
+    {
+        try
+        {
+            _currentTaskId = task.Id; // informativo para checkpoints (last-writer-wins)
+            await _plans.SaveAsync(plan, ct).ConfigureAwait(false);
+
+            await GoTaskAsync(AgentState.Executing, $"task '{task.Title}'", ct).ConfigureAwait(false);
+            _events.Publish(AgentEvent.Create(AgentEventType.TaskStarted, _correlation, task.Title));
+
+            await ExecuteTaskBodyAsync(plan, task, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Cinturón: el cuerpo ya clasifica sus fallos; esto solo cubre
+            // Save/Go/eventos. Dejar la tarea en Failed para no colgar el plan.
+            _log.LogError(ex, "Worker for task '{Title}' failed unexpectedly.", task.Title);
+            try
+            {
+                lock (_planLock)
+                {
+                    if (task.Status == AgentTaskStatus.InProgress)
+                    {
+                        task.MarkFailed($"Worker error: {ex.Message}", FailureCategory.ToolFailure);
+                    }
+                }
+
+                await _plans.SaveAsync(plan, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception inner)
+            {
+                _log.LogWarning(inner, "Worker fallback save failed.");
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task ExecuteTaskBodyAsync(Plan plan, AgentTask task, CancellationToken ct)
+    {
         TaskExecutionOutcome outcome;
         try
         {
@@ -289,13 +429,13 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
 
         if (outcome.Success)
         {
-            await Go(AgentState.Testing, $"task '{task.Title}'", ct).ConfigureAwait(false);
-            await Go(AgentState.VerifyingTask, $"task '{task.Title}'", ct).ConfigureAwait(false);
+            await GoTaskAsync(AgentState.Testing, $"task '{task.Title}'", ct).ConfigureAwait(false);
+            await GoTaskAsync(AgentState.VerifyingTask, $"task '{task.Title}'", ct).ConfigureAwait(false);
             task.MarkCompleted();
             await _plans.SaveAsync(plan, ct).ConfigureAwait(false);
             RememberTaskEvidence(task);
             _events.Publish(AgentEvent.Create(AgentEventType.TaskCompleted, _correlation, task.Title));
-            await Go(AgentState.AdvancingTask, "task verified", ct).ConfigureAwait(false);
+            await GoTaskAsync(AgentState.AdvancingTask, "task verified", ct).ConfigureAwait(false);
             return;
         }
 
@@ -308,7 +448,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            await Go(AgentState.AnalyzingFailure, $"{outcome.Category}: {outcome.Error}", ct).ConfigureAwait(false);
+            await GoTaskAsync(AgentState.AnalyzingFailure, $"{outcome.Category}: {outcome.Error}", ct).ConfigureAwait(false);
             task.MarkFailed(outcome.Error ?? "Unknown failure", outcome.Category);
             await _plans.SaveAsync(plan, ct).ConfigureAwait(false);
             _events.Publish(AgentEvent.Create(AgentEventType.TaskFailed, _correlation, $"{task.Title}: {outcome.Error}"));
@@ -316,7 +456,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
             if (!_repair.ShouldRepair(outcome.Category, task.Attempts, task.MaxAttempts))
             {
                 _log.LogWarning("Task '{Title}' not repairable ({Category}); advancing", task.Title, outcome.Category);
-                await Go(AgentState.AdvancingTask, "task failed, not repairable", ct).ConfigureAwait(false);
+                await GoTaskAsync(AgentState.AdvancingTask, "task failed, not repairable", ct).ConfigureAwait(false);
                 return;
             }
 
@@ -326,12 +466,12 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
                 await Task.Delay(delay, ct).ConfigureAwait(false);
             }
 
-            await Go(AgentState.Repairing, $"task '{task.Title}' attempt {task.Attempts + 1}", ct).ConfigureAwait(false);
+            await GoTaskAsync(AgentState.Repairing, $"task '{task.Title}' attempt {task.Attempts + 1}", ct).ConfigureAwait(false);
             _events.Publish(AgentEvent.Create(AgentEventType.RepairStarted, _correlation, task.Title));
 
             task.MarkStarted(); // nuevo intento
             await _plans.SaveAsync(plan, ct).ConfigureAwait(false);
-            await Go(AgentState.Retesting, $"task '{task.Title}'", ct).ConfigureAwait(false);
+            await GoTaskAsync(AgentState.Retesting, $"task '{task.Title}'", ct).ConfigureAwait(false);
 
             try
             {
@@ -354,12 +494,12 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
 
             if (outcome.Success)
             {
-                await Go(AgentState.VerifyingTask, $"task '{task.Title}' (repaired)", ct).ConfigureAwait(false);
+                await GoTaskAsync(AgentState.VerifyingTask, $"task '{task.Title}' (repaired)", ct).ConfigureAwait(false);
                 task.MarkCompleted();
                 await _plans.SaveAsync(plan, ct).ConfigureAwait(false);
                 RememberTaskEvidence(task);
                 _events.Publish(AgentEvent.Create(AgentEventType.TaskCompleted, _correlation, task.Title));
-                await Go(AgentState.AdvancingTask, "repaired task verified", ct).ConfigureAwait(false);
+                await GoTaskAsync(AgentState.AdvancingTask, "repaired task verified", ct).ConfigureAwait(false);
                 return;
             }
         }
@@ -368,9 +508,12 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
     /// <summary>Evidencia de ejecución para la auditoría (qué se hizo, no solo el plan).</summary>
     private void RememberTaskEvidence(AgentTask task)
     {
-        if (_taskEvidence.Count < 200)
+        lock (_evidenceLock)
         {
-            _taskEvidence.Add($"Task completed: {task.Title}");
+            if (_taskEvidence.Count < 200)
+            {
+                _taskEvidence.Add($"Task completed: {task.Title}");
+            }
         }
     }
 
@@ -385,9 +528,14 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
         try
         {
             session = await _sessions.LoadAsync(_sessionId, ct).ConfigureAwait(false);
+            List<string> evidence;
+            lock (_evidenceLock)
+            {
+                evidence = new List<string>(_taskEvidence);
+            }
+
             report = await _verifier.AuditAsync(
-                session?.UserRequest ?? string.Empty, plan,
-                new List<string>(_taskEvidence), ct).ConfigureAwait(false);
+                session?.UserRequest ?? string.Empty, plan, evidence, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

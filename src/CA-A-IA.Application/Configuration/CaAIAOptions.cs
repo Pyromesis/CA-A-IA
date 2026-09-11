@@ -55,6 +55,12 @@ public sealed class ExecutionSettings
     /// eternamente (el juez, sobre todo el semántico, puede no converger nunca).
     /// </summary>
     public int MaxAuditRounds { get; init; } = 2;
+
+    /// <summary>
+    /// Agentes en paralelo: tareas listas simultáneas por sesión (1 = secuencial
+    /// clásico). Las dependencias se siguen respetando (claim atómico).
+    /// </summary>
+    public int MaxParallelAgents { get; init; } = 3;
 }
 
 public sealed class SecuritySettings

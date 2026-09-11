@@ -336,6 +336,156 @@ public sealed class EngineTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_IndependentTasks_ExecuteInParallel()
+    {
+        var ctx = Stores();
+        var plan = new Plan
+        {
+            Goal = "Parallel work",
+            Requirements = new[] { "Parallel work" },
+            Tasks = new List<AgentTask>
+            {
+                new() { Title = "Task A", Description = "A" },
+                new() { Title = "Task B", Description = "B" },
+                new() { Title = "Task C", Description = "C" },
+            },
+        };
+        var sessionId = await SeedAsync(ctx, plan);
+        var current = 0;
+        var maxObserved = 0;
+        var engine = new AgentExecutionEngine(sessionId, ctx.Sessions, ctx.Plans, ctx.Checkpoints,
+            ctx.Events,
+            new NamedExecutor(async (_, ct) =>
+            {
+                var now = Interlocked.Increment(ref current);
+                try
+                {
+                    int prev, next;
+                    do
+                    {
+                        prev = maxObserved;
+                        next = Math.Max(prev, now);
+                    }
+                    while (Interlocked.CompareExchange(ref maxObserved, next, prev) != prev);
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                    return new TaskExecutionOutcome(true);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref current);
+                }
+            }),
+            new SatisfiedVerifier(), new InstantRepairPolicy(), EngineOptions(),
+            NullLogger<AgentExecutionEngine>.Instance);
+
+        await engine.RunAsync(sessionId, CancellationToken.None);
+
+        Assert.Equal(AgentState.Completed, engine.StateMachine.Current);
+        Assert.True(maxObserved >= 2, $"Expected parallel execution, max concurrency was {maxObserved}.");
+        var session = await ctx.Sessions.LoadAsync(sessionId, CancellationToken.None);
+        var stored = await ctx.Plans.LoadAsync(session!.PlanId!.Value, CancellationToken.None);
+        Assert.NotNull(stored);
+        Assert.All(stored.Tasks, t => Assert.Equal(AgentTaskStatus.Completed, t.Status));
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Run_DependentTasks_RespectOrder()
+    {
+        var ctx = Stores();
+        var first = new AgentTask { Title = "First", Description = "1st" };
+        var plan = new Plan
+        {
+            Goal = "Ordered work",
+            Requirements = new[] { "Ordered work" },
+            Tasks = new List<AgentTask>
+            {
+                first,
+                new() { Title = "Second", Description = "2nd", DependsOn = new[] { first.Id } },
+            },
+        };
+        var sessionId = await SeedAsync(ctx, plan);
+        var events = new List<string>();
+        var gate = new object();
+        var engine = new AgentExecutionEngine(sessionId, ctx.Sessions, ctx.Plans, ctx.Checkpoints,
+            ctx.Events,
+            new NamedExecutor(async (task, _) =>
+            {
+                lock (gate)
+                {
+                    events.Add("start:" + task.Title);
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(50));
+                lock (gate)
+                {
+                    events.Add("end:" + task.Title);
+                }
+
+                return new TaskExecutionOutcome(true);
+            }),
+            new SatisfiedVerifier(), new InstantRepairPolicy(), EngineOptions(),
+            NullLogger<AgentExecutionEngine>.Instance);
+
+        await engine.RunAsync(sessionId, CancellationToken.None);
+
+        Assert.Equal(AgentState.Completed, engine.StateMachine.Current);
+        var startSecond = events.IndexOf("start:Second");
+        var endFirst = events.IndexOf("end:First");
+        Assert.True(startSecond > endFirst, "Second started before First finished: " +
+            string.Join(",", events));
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Run_MaxParallelAgentsOne_StaysSequential()
+    {
+        var ctx = Stores();
+        var plan = new Plan
+        {
+            Goal = "Sequential work",
+            Requirements = new[] { "Sequential work" },
+            Tasks = new List<AgentTask>
+            {
+                new() { Title = "Task A", Description = "A" },
+                new() { Title = "Task B", Description = "B" },
+            },
+        };
+        var sessionId = await SeedAsync(ctx, plan);
+        var options = Options.Create(new CaAIAOptions
+        {
+            Execution = new ExecutionSettings
+            {
+                OperationTimeoutSeconds = 30,
+                GlobalTimeoutMinutes = 1,
+                HeartbeatSeconds = 5,
+                ToolTimeoutSeconds = 10,
+                MaxParallelAgents = 1,
+            },
+        });
+        var order = new List<string>();
+        var engine = new AgentExecutionEngine(sessionId, ctx.Sessions, ctx.Plans, ctx.Checkpoints,
+            ctx.Events,
+            new NamedExecutor((task, _) =>
+            {
+                lock (order)
+                {
+                    order.Add(task.Title);
+                }
+
+                return Task.FromResult(new TaskExecutionOutcome(true));
+            }),
+            new SatisfiedVerifier(), new InstantRepairPolicy(), options,
+            NullLogger<AgentExecutionEngine>.Instance);
+
+        await engine.RunAsync(sessionId, CancellationToken.None);
+
+        Assert.Equal(AgentState.Completed, engine.StateMachine.Current);
+        Assert.Equal(new[] { "Task A", "Task B" }, order);
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
     public void FilterAlreadyAddressed_SkipsDuplicateGaps()
     {
         var plan = new Plan
@@ -446,6 +596,14 @@ public sealed class EngineTests : IDisposable
         private readonly Func<CancellationToken, Task<TaskExecutionOutcome>> _fn;
         public ScriptedExecutor(Func<CancellationToken, Task<TaskExecutionOutcome>> fn) => _fn = fn;
         public Task<TaskExecutionOutcome> ExecuteTaskAsync(Plan plan, AgentTask task, CancellationToken ct) => _fn(ct);
+    }
+
+    private sealed class NamedExecutor : ITaskExecutor
+    {
+        private readonly Func<AgentTask, CancellationToken, Task<TaskExecutionOutcome>> _fn;
+        public NamedExecutor(Func<AgentTask, CancellationToken, Task<TaskExecutionOutcome>> fn) => _fn = fn;
+        public Task<TaskExecutionOutcome> ExecuteTaskAsync(Plan plan, AgentTask task, CancellationToken ct) =>
+            _fn(task, ct);
     }
 
     private sealed class SatisfiedVerifier : IPlanVerifier
