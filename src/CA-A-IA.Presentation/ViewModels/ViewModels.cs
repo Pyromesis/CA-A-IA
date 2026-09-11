@@ -110,7 +110,16 @@ public sealed partial class StatusBarViewModel : ObservableObject, IDisposable
         if (state is not null)
         {
             var captured = state;
-            _dispatcher.TryEnqueue(() => AgentState = captured);
+            _dispatcher.TryEnqueue(() =>
+            {
+                AgentState = captured;
+                // La sesión también avanza con el motor: si no, la barra muestra
+                // "Executing … Idle" a la vez y nadie sabe qué pasa.
+                if (_sessionId.HasValue)
+                {
+                    SessionInfo = $"Session {_sessionId.Value:N} · {captured}";
+                }
+            });
         }
 
         return Task.CompletedTask;
@@ -135,8 +144,13 @@ public sealed partial class StatusBarViewModel : ObservableObject, IDisposable
         return (colon < 0 ? rest : rest[..colon]).Trim();
     }
 
-    public void SetSession(SessionDto? session) =>
+    public void SetSession(SessionDto? session)
+    {
+        _sessionId = session?.Id;
         SessionInfo = session is null ? "No session" : $"Session {session.Id:N} · {session.LastKnownState}";
+    }
+
+    private Guid? _sessionId;
 
     public void Dispose() => _subscription.Dispose();
 }
@@ -356,10 +370,13 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
 
     partial void OnShowFreeOnlyChanged(bool value)
     {
-        if (!_suppressSelectionEvents)
+        if (_suppressSelectionEvents)
         {
-            RefreshSuggestions();
+            return;
         }
+
+        _prefs.SetShowFreeOnly(value);
+        RefreshSuggestions();
     }
 
     partial void OnSelectedModelChanged(ModelOption? value)
@@ -463,6 +480,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         {
             SelectedProvider = AvailableProviders.FirstOrDefault(p => p.Id == prefs.ProviderId)
                 ?? AvailableProviders.FirstOrDefault();
+            ShowFreeOnly = prefs.ShowFreeOnly;
             var current = new ModelOption(prefs.ProviderId, prefs.ModelId);
             _allModels.Add(current);
             AvailableModels.Add(current);
@@ -668,6 +686,20 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         WorkspacePath = _prefs.WorkspacePath;
         SyncSelectionFromPrefs();
         SyncAuthLevelFromPrefs();
+        if (ShowFreeOnly != _prefs.ShowFreeOnly)
+        {
+            _suppressSelectionEvents = true;
+            try
+            {
+                ShowFreeOnly = _prefs.ShowFreeOnly;
+            }
+            finally
+            {
+                _suppressSelectionEvents = false;
+            }
+
+            RefreshSuggestions();
+        }
     }
 
     private void SyncSelectionFromPrefs()
@@ -1478,17 +1510,20 @@ public sealed partial class FilesViewModel : ObservableObject
     private readonly Diagnostics.UiFlightRecorder _flight; // TEMPORARY-DIAGNOSTIC
     private CancellationTokenSource? _refreshCts;
 
-    private ObservableCollection<string> _files = new();
-    public ObservableCollection<string> Files
+    private ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode> _fileTree = new();
+    public ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode> FileTree
     {
-        get => _files;
-        private set => SetProperty(ref _files, value);
+        get => _fileTree;
+        private set => SetProperty(ref _fileTree, value);
     }
 
     public string WorkspacePath => _prefs.WorkspacePath;
 
     [ObservableProperty]
     private bool _isRefreshing;
+
+    [ObservableProperty]
+    private int _fileCount;
 
     [ObservableProperty]
     private string _statusText = string.Empty;
@@ -1548,19 +1583,17 @@ public sealed partial class FilesViewModel : ObservableObject
                 .ConfigureAwait(false);
             loadCt.ThrowIfCancellationRequested();
 
-            // Reemplazo por lotes: un Clear + N Add notifican N veces al ListView.
-            // Construir fuera y publicar de golpe deja una sola actualización.
-            var fresh = new ObservableCollection<string>();
-            foreach (var fragment in context.Fragments)
-            {
-                loadCt.ThrowIfCancellationRequested();
-                fresh.Add(fragment.Source);
-            }
+            // Árbol puro en background (sin UI): anida, ordena y cuenta.
+            var tree = await Task.Run(
+                () => Application.Services.FileTreeBuilder.Build(
+                    workspace, context.Fragments.Select(f => f.Source)), loadCt)
+                .ConfigureAwait(false);
 
             await RunOnUiAsync(() =>
             {
-                Files = fresh;
-                StatusText = $"{Files.Count} archivos.";
+                FileTree = MapToNodes(tree);
+                FileCount = tree.Item.DescendantFiles;
+                StatusText = $"{FileCount} archivos.";
             }).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -1583,6 +1616,33 @@ public sealed partial class FilesViewModel : ObservableObject
                 RefreshCommand.NotifyCanExecuteChanged();
             }).ConfigureAwait(false);
         }
+    }
+
+    private static ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode> MapToNodes(
+        Application.Services.FileTreeNode root)
+    {
+        var nodes = new ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode>
+        {
+            MapNode(root, depth: 0),
+        };
+        return nodes;
+    }
+
+    private static Microsoft.UI.Xaml.Controls.TreeViewNode MapNode(
+        Application.Services.FileTreeNode node, int depth)
+    {
+        // Raíz y primer nivel abiertos: se ve la estructura sin clicks.
+        var treeNode = new Microsoft.UI.Xaml.Controls.TreeViewNode
+        {
+            Content = node.Item,
+            IsExpanded = depth <= 1,
+        };
+        foreach (var child in node.Children)
+        {
+            treeNode.Children.Add(MapNode(child, depth + 1));
+        }
+
+        return treeNode;
     }
 
     private Task RunOnUiAsync(Action action)

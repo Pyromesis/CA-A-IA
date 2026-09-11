@@ -118,10 +118,23 @@ public sealed class OpenCodeProvider : IAIProvider, IAsyncDisposable
         OpenCodeAnswer answer;
         _events?.Publish(Domain.Events.AgentEvent.Create(
             Domain.Enums.AgentEventType.ToolStarted, request.Correlation, "OpenCode started."));
+        // Las herramientas corren en el SERVIDOR: se observan sondeando sus
+        // mensajes (best-effort) para narrar "leyendo/editando/ejecutando" en vivo.
+        // El set compartido evita burbujas duplicadas entre sondeo y cierre.
+        var seenTools = new HashSet<string>(StringComparer.Ordinal);
+        using var pollCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var poller = PollServerToolsAsync(client, session.Id, request.Correlation, seenTools, pollCts.Token);
         try
         {
             answer = await client.PromptAsync(session.Id, prompt, providerId, modelId, directory, timeout, ct,
                 NormalizeEffort(request.ReasoningEffort)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelación/timeout: desatascar también el LADO SERVIDOR, que si no
+            // sigue quemando tokens en segundo plano.
+            _ = client.AbortSessionAsync(session.Id, CancellationToken.None);
+            throw;
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or HttpRequestException)
         {
@@ -129,12 +142,209 @@ public sealed class OpenCodeProvider : IAIProvider, IAsyncDisposable
                 Domain.Enums.AgentEventType.ToolCompleted, request.Correlation, $"OpenCode: {ex.Message}"));
             throw Map(ex);
         }
+        finally
+        {
+            pollCts.Cancel();
+            try
+            {
+                await poller.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // El sondeo nunca rompe la respuesta.
+            }
+        }
+
+        // Cierre: lo visto en el último sondeo + lo que traiga la respuesta
+        // (puede incluir herramientas de mensajes previos de la sesión).
+        // Solo Completed: ya ocurrieron; los Started en vivo los puso el sondeo.
+        var closing = new Dictionary<string, OpenCodeServerToolCall>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var call in await client.GetSessionToolCallsAsync(
+                session.Id, CancellationToken.None).ConfigureAwait(false))
+            {
+                closing[call.Key] = call;
+            }
+        }
+        catch (Exception ex)
+        {
+            _clientLog.LogDebug(ex, "OpenCode closing tool fetch failed (non-fatal).");
+        }
+
+        foreach (var call in answer.ToolCalls ?? Enumerable.Empty<OpenCodeServerToolCall>())
+        {
+            closing[call.Key] = call;
+        }
+
+        foreach (var call in closing.Values)
+        {
+            PublishServerToolCompleted(call, request.Correlation, seenTools);
+        }
 
         _events?.Publish(Domain.Events.AgentEvent.Create(
             Domain.Enums.AgentEventType.ToolCompleted, request.Correlation, "OpenCode: ok"));
 
         return new AIResponse(answer.Text, Array.Empty<AIToolCall>(), request.ModelId,
             new TokenUsage(answer.InputTokens, answer.OutputTokens), FinishReason: "stop");
+    }
+
+    /// <summary>
+    /// Sondea los mensajes de la sesión (cada 2,5 s) y traduce herramientas del
+    /// servidor a eventos ToolStarted/ToolCompleted: el Chat ya sabe narrarlos
+    /// ("Leyendo X…", "✎ Editó Y", "▶ Ejecutó Z"). Todo best-effort.
+    /// </summary>
+    private async Task PollServerToolsAsync(
+        OpenCodeServerClient client,
+        string sessionId,
+        Domain.Correlation.CorrelationContext? correlation,
+        HashSet<string> seen,
+        CancellationToken ct)
+    {
+        var pending = new Dictionary<string, OpenCodeServerToolCall>(StringComparer.Ordinal);
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2.5), ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                IReadOnlyList<OpenCodeServerToolCall> calls;
+                try
+                {
+                    calls = await client.GetSessionToolCallsAsync(sessionId, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _clientLog.LogDebug(ex, "OpenCode tool poll failed (non-fatal).");
+                    continue;
+                }
+
+                foreach (var call in calls)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (seen.Contains(call.Key))
+                    {
+                        // ¿Terminó desde el último sondeo?
+                        if (pending.TryGetValue(call.Key, out _) && IsDone(call.State))
+                        {
+                            pending.Remove(call.Key);
+                            PublishServerToolCompleted(call, correlation, seen);
+                        }
+
+                        continue;
+                    }
+
+                    seen.Add(call.Key);
+                    PublishServerToolStarted(call, correlation);
+                    if (IsDone(call.State))
+                    {
+                        PublishServerToolCompleted(call, correlation, seen);
+                    }
+                    else
+                    {
+                        pending[call.Key] = call;
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static bool IsDone(string state) =>
+        state is "completed" or "done" or "success" or "error" or "failed";
+
+    private static bool IsError(string state) => state is "error" or "failed";
+
+    /// <summary>Traduce la herramienta del servidor a nuestros ids (reusa la narración del Chat).</summary>
+    internal static string MapServerTool(string tool) =>
+        tool.Trim().ToLowerInvariant() switch
+        {
+            "read" => "ReadFile",
+            "list" or "glob" => "ListDirectory",
+            "grep" or "search" => "SearchText",
+            "edit" or "patch" or "apply" => "EditFile",
+            "write" or "create" => "WriteFile",
+            "bash" or "shell" or "exec" or "run" or "command" => "ExecuteCommand",
+            _ => "OpenCode",
+        };
+
+    private void PublishServerToolStarted(
+        OpenCodeServerToolCall call, Domain.Correlation.CorrelationContext? correlation)
+    {
+        if (_events is null)
+        {
+            return;
+        }
+
+        var id = MapServerTool(call.Tool);
+        if (id == "OpenCode")
+        {
+            return; // ruido: el "Trabajando en OpenCode…" base ya está activo
+        }
+
+        _events.Publish(Domain.Events.AgentEvent.Create(
+            Domain.Enums.AgentEventType.ToolStarted, correlation,
+            $"{id} started.", ServerArgsJson(id, call.Title)));
+    }
+
+    private void PublishServerToolCompleted(
+        OpenCodeServerToolCall call,
+        Domain.Correlation.CorrelationContext? correlation,
+        HashSet<string> seen)
+    {
+        if (_events is null || !seen.Add(call.Key + ":done"))
+        {
+            return;
+        }
+
+        var id = MapServerTool(call.Tool);
+        if (id == "OpenCode")
+        {
+            return;
+        }
+
+        var ok = !IsError(call.State);
+        _events.Publish(Domain.Events.AgentEvent.Create(
+            Domain.Enums.AgentEventType.ToolCompleted, correlation,
+            ok ? $"{id}: ok" : $"{id}: {call.Title}",
+            ServerArgsJson(id, call.Title)));
+    }
+
+    private static string ServerArgsJson(string mappedId, string title)
+    {
+        var safe = title ?? string.Empty;
+        return mappedId == "ExecuteCommand"
+            ? System.Text.Json.JsonSerializer.Serialize(new
+            {
+                command = FirstWord(safe),
+                args = new[] { RestWords(safe) },
+            })
+            : System.Text.Json.JsonSerializer.Serialize(new { path = safe });
+    }
+
+    private static string FirstWord(string text)
+    {
+        var parts = (text ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 0 ? parts[0] : string.Empty;
+    }
+
+    private static string RestWords(string text)
+    {
+        var parts = (text ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 1 ? string.Join(" ", parts[1..]) : string.Empty;
     }
 
     public async IAsyncEnumerable<AIStreamChunk> StreamAsync(

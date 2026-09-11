@@ -245,6 +245,10 @@ public sealed class LlmTaskExecutor : ITaskExecutor
     private static FailureCategory MapProviderError(AIErrorKind kind) => kind switch
     {
         AIErrorKind.Network or AIErrorKind.Timeout => FailureCategory.NetworkFailure,
+        // Auth/cuota/modelo/contexto: problema de CONFIGURACIÓN, no del código.
+        // Reintentarlo mutilaría el proyecto a ciegas: escala sin reparar.
+        AIErrorKind.Authentication or AIErrorKind.Authorization or AIErrorKind.ModelNotFound
+            or AIErrorKind.ContextTooLong => FailureCategory.EnvironmentFailure,
         _ => FailureCategory.ProviderFailure,
     };
 

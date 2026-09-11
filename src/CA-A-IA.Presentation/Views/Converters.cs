@@ -52,13 +52,60 @@ public sealed class StatusBrushConverter : IValueConverter
 public sealed class FileGlyphConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) =>
-        System.IO.Path.GetExtension((value as string) ?? string.Empty).ToLowerInvariant() switch
+        GlyphForPath((value as string) ?? string.Empty);
+
+    internal static string GlyphForPath(string path) =>
+        System.IO.Path.GetExtension(path).ToLowerInvariant() switch
         {
-            ".cs" or ".ps1" or ".csproj" or ".slnx" or ".sln" or ".props" or ".targets" => "\uE943",
-            ".md" => "\uE8A5",
-            ".json" or ".xml" or ".xaml" => "\uE8A5",
+            ".cs" or ".ps1" or ".csproj" or ".slnx" or ".sln" or ".props" or ".targets"
+                or ".py" or ".js" or ".ts" or ".tsx" or ".jsx" or ".java" or ".go" or ".rs"
+                or ".cpp" or ".h" or ".hpp" or ".c" or ".sql" or ".sh" or ".css" or ".scss"
+                or ".html" => "\uE943",
             _ => "\uE8A5",
         };
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Nodo del árbol → glifo (carpeta ámbar / fichero por extensión).</summary>
+public sealed class FileTreeItemGlyphConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        if (value is not Application.Services.FileTreeItem item)
+        {
+            return "\uE8A5";
+        }
+
+        return item.IsDirectory ? "\uE8B7" : FileGlyphConverter.GlyphForPath(item.FullPath);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Nodo del árbol → color (carpeta marca / fichero info).</summary>
+public sealed class FileTreeItemBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var key = value is Application.Services.FileTreeItem item && item.IsDirectory
+            ? "AppBrandBrush" : "AppInfoBrush";
+        try
+        {
+            var resources = Microsoft.UI.Xaml.Application.Current?.Resources;
+            if (resources is not null && resources[key] is Brush b)
+            {
+                return b;
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();

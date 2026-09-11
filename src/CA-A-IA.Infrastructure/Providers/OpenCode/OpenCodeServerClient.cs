@@ -15,7 +15,21 @@ namespace CaAIA.Infrastructure.Providers.OpenCode;
 public sealed record OpenCodeSession(string Id, string Title);
 
 /// <summary>Respuesta del asistente: texto agregado de las parts + tokens si el servidor los da.</summary>
-public sealed record OpenCodeAnswer(string Text, int InputTokens, int OutputTokens);
+public sealed record OpenCodeAnswer(
+    string Text,
+    int InputTokens,
+    int OutputTokens,
+    IReadOnlyList<OpenCodeServerToolCall>? ToolCalls = null);
+
+/// <summary>
+/// Herramienta observada en el servidor (part de mensaje). Todo best-effort:
+/// el esquema exacto varía por versión; lo desconocido se ignora, nunca rompe.
+/// </summary>
+public sealed record OpenCodeServerToolCall(
+    string Key,
+    string Tool,
+    string Title,
+    string State);
 
 /// <summary>Modelo ofertado (forma `provider/model` de `opencode models` o catálogo del servidor).</summary>
 public sealed record OpenCodeModel(
@@ -269,13 +283,16 @@ public sealed class OpenCodeServerClient
         }
 
         var sb = new StringBuilder();
+        var tools = new List<OpenCodeServerToolCall>();
         if (node.ValueKind == JsonValueKind.Object && node.TryGetProperty("parts", out var parts)
             && parts.ValueKind == JsonValueKind.Array)
         {
+            var index = 0;
             foreach (var part in parts.EnumerateArray())
             {
                 if (part.ValueKind != JsonValueKind.Object)
                 {
+                    index++;
                     continue;
                 }
 
@@ -284,6 +301,14 @@ public sealed class OpenCodeServerClient
                 {
                     sb.Append(text);
                 }
+
+                var tool = ParseServerToolPart(part, $"p{index}");
+                if (tool is not null)
+                {
+                    tools.Add(tool);
+                }
+
+                index++;
             }
         }
 
@@ -296,8 +321,140 @@ public sealed class OpenCodeServerClient
             output = tokens.Value.Output;
         }
 
-        return new OpenCodeAnswer(sb.ToString(), input, output);
+        return new OpenCodeAnswer(sb.ToString(), input, output, tools);
     }
+
+    /// <summary>
+    /// Lista los mensajes de una sesión con sus parts (para narrar herramientas
+    /// mientras el servidor trabaja). 404/versión sin soporte → lista vacía.
+    /// </summary>
+    public async Task<IReadOnlyList<OpenCodeServerToolCall>> GetSessionToolCallsAsync(
+        string sessionId, CancellationToken ct)
+    {
+        using var response = await GetAsync(
+            $"session/{Uri.EscapeDataString(sessionId)}/message?limit=50",
+            TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            return Array.Empty<OpenCodeServerToolCall>();
+        }
+
+        try
+        {
+            using var doc = await JsonAsync(response, ct).ConfigureAwait(false);
+            return ParseMessageListTools(UnwrapData(doc.RootElement));
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            _log.LogDebug(ex, "OpenCode session messages: unparsable shape.");
+            return Array.Empty<OpenCodeServerToolCall>();
+        }
+    }
+
+    /// <summary>Aborta la sesión en el servidor (desatascar su lado al cancelar/timeout). Nunca lanza.</summary>
+    public async Task AbortSessionAsync(string sessionId, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await PostAsync(
+                $"session/{Uri.EscapeDataString(sessionId)}/abort", "{}", TimeSpan.FromSeconds(10), ct)
+                .ConfigureAwait(false);
+            _log.LogDebug("OpenCode abort {Session}: {Status}", sessionId, (int)response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "OpenCode abort {Session} failed (non-fatal).", sessionId);
+        }
+    }
+
+    /// <summary>Parts de una lista [{info, parts[]}] o de un mensaje suelto.</summary>
+    internal static IReadOnlyList<OpenCodeServerToolCall> ParseMessageListTools(JsonElement root)
+    {
+        var result = new List<OpenCodeServerToolCall>();
+        IEnumerable<JsonElement> messages = root.ValueKind == JsonValueKind.Array
+            ? root.EnumerateArray()
+            : new[] { root };
+        foreach (var message in messages)
+        {
+            if (message.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var messageId = Str(message, "id") ?? Str(message, "messageID") ?? Str(message, "messageId")
+                ?? (message.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Object
+                    ? Str(info, "id") ?? Str(info, "messageID") : null)
+                ?? "m";
+            var node = message;
+            if (node.TryGetProperty("info", out var infoObj) && infoObj.ValueKind == JsonValueKind.Object
+                && !message.TryGetProperty("parts", out _) && infoObj.TryGetProperty("parts", out _))
+            {
+                node = infoObj;
+            }
+
+            if (!node.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var index = 0;
+            foreach (var part in parts.EnumerateArray())
+            {
+                if (part.ValueKind == JsonValueKind.Object)
+                {
+                    var tool = ParseServerToolPart(part, $"{messageId}#{index}");
+                    if (tool is not null)
+                    {
+                        result.Add(tool);
+                    }
+                }
+
+                index++;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Detecta una part de herramienta: type con "tool" o campo "tool"/"name" de
+    /// herramienta conocida (read/edit/write/bash/...). Todo lo demás → null.
+    /// </summary>
+    internal static OpenCodeServerToolCall? ParseServerToolPart(JsonElement part, string fallbackKey)
+    {
+        var type = Str(part, "type") ?? string.Empty;
+        var tool = Str(part, "tool");
+        var name = Str(part, "name");
+        var isTool = type.Contains("tool", StringComparison.OrdinalIgnoreCase)
+            || IsKnownServerTool(tool) || IsKnownServerTool(name);
+        if (!isTool)
+        {
+            return null;
+        }
+
+        tool ??= name ?? type;
+        var title = Str(part, "title")
+            ?? Str(part, "file") ?? Str(part, "path") ?? Str(part, "filename")
+            ?? Str(part, "command") ?? Str(part, "pattern") ?? Str(part, "query")
+            ?? TryNestedStr(part, "input", "file") ?? TryNestedStr(part, "input", "path")
+            ?? TryNestedStr(part, "input", "command") ?? TryNestedStr(part, "input", "pattern")
+            ?? TryNestedStr(part, "state", "title") ?? string.Empty;
+        var state = TryNestedStr(part, "state", "status")
+            ?? Str(part, "status") ?? Str(part, "state") ?? string.Empty;
+        var key = Str(part, "id") ?? Str(part, "partID") ?? Str(part, "partId") ?? fallbackKey;
+        return new OpenCodeServerToolCall(key, tool.Trim(), title.Trim(), state.Trim().ToLowerInvariant());
+    }
+
+    private static bool IsKnownServerTool(string? name) =>
+        name is not null && name.Trim().ToLowerInvariant() is
+            "read" or "edit" or "write" or "create" or "bash" or "shell" or "exec"
+            or "glob" or "grep" or "list" or "patch" or "apply" or "run" or "todo"
+            or "webfetch" or "websearch";
+
+    private static string? TryNestedStr(JsonElement el, string outer, string inner) =>
+        el.ValueKind == JsonValueKind.Object
+        && el.TryGetProperty(outer, out var o) && o.ValueKind == JsonValueKind.Object
+            ? Str(o, inner) : null;
 
     private static (int Input, int Output)? FindTokens(JsonElement root)
     {

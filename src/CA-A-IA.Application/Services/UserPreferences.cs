@@ -25,6 +25,10 @@ public interface IUserPreferences
     /// <summary>Nivel de autorización del agente (1 = confirma todo; ver AuthorizationLevel).</summary>
     Domain.Security.AuthorizationLevel AuthorizationLevel { get; }
     void SetAuthorizationLevel(Domain.Security.AuthorizationLevel level);
+
+    /// <summary>Filtro "solo gratis" del catálogo de modelos.</summary>
+    bool ShowFreeOnly { get; }
+    void SetShowFreeOnly(bool showFreeOnly);
     event EventHandler? Changed;
 
     /// <summary>Carga lo persistido (una vez, al arrancar). Sin llamar, valen los defaults.</summary>
@@ -70,6 +74,7 @@ public sealed class UserPreferences : IUserPreferences
     public const string ModelKey = "model.id";
     public const string EffortKey = "reasoning.effort";
     public const string AuthLevelKey = "auth.level";
+    public const string FreeOnlyKey = "ui.showFreeOnly";
 
     private readonly object _gate = new();
     private readonly object _pendingGate = new();
@@ -80,6 +85,7 @@ public sealed class UserPreferences : IUserPreferences
     private string _modelId;
     private string _effort = string.Empty;
     private Domain.Security.AuthorizationLevel _authLevel = Domain.Security.AuthorizationLevel.ConfirmChanges;
+    private bool _showFreeOnly;
     private bool _initialized;
 
     public event EventHandler? Changed;
@@ -122,6 +128,24 @@ public sealed class UserPreferences : IUserPreferences
     public Domain.Security.AuthorizationLevel AuthorizationLevel
     {
         get { lock (_gate) { return _authLevel; } }
+    }
+
+    public bool ShowFreeOnly { get { lock (_gate) { return _showFreeOnly; } } }
+
+    public void SetShowFreeOnly(bool showFreeOnly)
+    {
+        lock (_gate)
+        {
+            if (_showFreeOnly == showFreeOnly)
+            {
+                return;
+            }
+
+            _showFreeOnly = showFreeOnly;
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        _ = PersistAsync(FreeOnlyKey, showFreeOnly ? "1" : string.Empty);
     }
 
     public void SetModel(string providerId, string modelId)
@@ -201,6 +225,7 @@ public sealed class UserPreferences : IUserPreferences
             var model = await _store.GetAsync(ModelKey, cancellationToken).ConfigureAwait(false);
             var effort = await _store.GetAsync(EffortKey, cancellationToken).ConfigureAwait(false);
             var authLevel = await _store.GetAsync(AuthLevelKey, cancellationToken).ConfigureAwait(false);
+            var freeOnly = await _store.GetAsync(FreeOnlyKey, cancellationToken).ConfigureAwait(false);
             var changed = false;
             lock (_gate)
             {
@@ -232,6 +257,12 @@ public sealed class UserPreferences : IUserPreferences
                     && Enum.IsDefined(typeof(Domain.Security.AuthorizationLevel), level))
                 {
                     _authLevel = (Domain.Security.AuthorizationLevel)level;
+                    changed = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(freeOnly))
+                {
+                    _showFreeOnly = freeOnly.Trim() == "1";
                     changed = true;
                 }
             }

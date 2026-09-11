@@ -51,6 +51,23 @@ public sealed class UserPreferencesTests
     }
 
     [Fact]
+    public async Task ShowFreeOnly_Roundtrips_ThroughStore()
+    {
+        var store = new MemorySettingsStore();
+        var prefs = Create(store);
+        await prefs.InitializeAsync(CancellationToken.None);
+        Assert.False(prefs.ShowFreeOnly);
+
+        prefs.SetShowFreeOnly(true);
+        await prefs.FlushAsync(CancellationToken.None);
+        Assert.Equal("1", await store.GetAsync(UserPreferences.FreeOnlyKey, CancellationToken.None));
+
+        var reloaded = Create(store);
+        await reloaded.InitializeAsync(CancellationToken.None);
+        Assert.True(reloaded.ShowFreeOnly);
+    }
+
+    [Fact]
     public void Workspace_DefaultsToDocuments_WhenPresent()
     {
         var prefs = Create(new MemorySettingsStore());

@@ -261,6 +261,106 @@ public sealed class OpenCodeTests
     private static HttpResponseMessage Json(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
+    [Fact]
+    public void ParseServerToolPart_DetectsKnownTools_AndIgnoresText()
+    {
+        using var doc = JsonDocument.Parse("""
+            {"type":"tool","tool":"read","title":"C:\\w\\a.txt","state":{"status":"completed"},"id":"p1"}
+            """);
+        var call = OpenCodeServerClient.ParseServerToolPart(doc.RootElement, "fallback");
+        Assert.NotNull(call);
+        Assert.Equal("p1", call.Key);
+        Assert.Equal("read", call.Tool);
+        Assert.Equal("completed", call.State);
+        Assert.Equal(OpenCodeProvider.MapServerTool("read"), "ReadFile");
+
+        using var text = JsonDocument.Parse("""{"type":"text","text":"hi"}""");
+        Assert.Null(OpenCodeServerClient.ParseServerToolPart(text.RootElement, "x"));
+
+        using var garbage = JsonDocument.Parse("""{"weird":true}""");
+        Assert.Null(OpenCodeServerClient.ParseServerToolPart(garbage.RootElement, "x"));
+    }
+
+    [Theory]
+    [InlineData("bash", "ExecuteCommand")]
+    [InlineData("EDIT", "EditFile")]
+    [InlineData("create", "WriteFile")]
+    [InlineData("glob", "ListDirectory")]
+    [InlineData("grep", "SearchText")]
+    [InlineData("frobnicate", "OpenCode")]
+    public void MapServerTool_MapsToKnownIds(string server, string expected)
+    {
+        Assert.Equal(expected, OpenCodeProvider.MapServerTool(server));
+    }
+
+    [Fact]
+    public void ParseMessageListTools_ReadsSessionMessages()
+    {
+        using var doc = JsonDocument.Parse("""
+            [{"info":{"id":"m1"},"parts":[
+               {"type":"text","text":"done"},
+               {"type":"tool","tool":"edit","title":"C:\\w\\b.cs","state":{"status":"pending"},"id":"t1"}]},
+             {"bogus":1}]
+            """);
+        var calls = OpenCodeServerClient.ParseMessageListTools(doc.RootElement);
+        var call = Assert.Single(calls);
+        Assert.Equal("t1", call.Key);
+        Assert.Equal("edit", call.Tool);
+        Assert.Equal("pending", call.State);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NarratesServerTools()
+    {
+        var events = new Infrastructure.Events.InMemoryEventBus(
+            NullLogger<Infrastructure.Events.InMemoryEventBus>.Instance);
+        var seen = new List<Domain.Events.AgentEvent>();
+        using var _ = events.SubscribeAll((e, _) => { seen.Add(e); return Task.CompletedTask; });
+
+        var handler = new StubHandler(req =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/session", StringComparison.Ordinal))
+            {
+                return Json("""{"id":"s1","title":"t"}""");
+            }
+
+            if (req.Method == HttpMethod.Post && path.Contains("/message", StringComparison.Ordinal))
+            {
+                return Json("""{"parts":[{"type":"tool","tool":"read","title":"C:\\w\\a.txt","state":{"status":"completed"},"id":"t9"},{"type":"text","text":"done"}]}""");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+        var provider = new OpenCodeProvider(
+            Options.Create(new OpenCodeOptions()),
+            new NullSecrets(),
+            new Infrastructure.Process.ProcessRunner(),
+            NullLogger<OpenCodeServerClient>.Instance,
+            NullLogger<ProcessServerLifecycle>.Instance,
+            new HttpClient(handler),
+            new NullServerLifecycle("http://127.0.0.1:9"),
+            events);
+
+        var response = await provider.CompleteAsync(Request("opencode/m"), CancellationToken.None);
+        Assert.Equal("done", response.Content);
+        // El bus publica en background: esperar con techo en vez de asumir orden.
+        // Post-hoc solo hay completados (las herramientas ya ocurrieron en el
+        // servidor); los Started en vivo los pone el sondeo durante la llamada.
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline
+            && !seen.Any(e => e.Type == Domain.Enums.AgentEventType.ToolCompleted
+                && (e.Summary ?? string.Empty).StartsWith("ReadFile: ok", StringComparison.Ordinal)))
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Contains(seen, e => e.Type == Domain.Enums.AgentEventType.ToolStarted
+            && (e.Summary ?? string.Empty).StartsWith("OpenCode started.", StringComparison.Ordinal));
+        Assert.Contains(seen, e => e.Type == Domain.Enums.AgentEventType.ToolCompleted
+            && (e.Summary ?? string.Empty).StartsWith("ReadFile: ok", StringComparison.Ordinal));
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _fn;

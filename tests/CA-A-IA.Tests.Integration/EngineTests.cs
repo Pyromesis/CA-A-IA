@@ -260,6 +260,49 @@ public sealed class EngineTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_OperationTimeout_BecomesFailure_NotPoison()
+    {
+        // El timeout de operación (1 s) NO es pausa/cancelación: antes escapaba
+        // como OperationCanceledException, dejaba el motor sin estado terminal y
+        // el siguiente Run moría con transición ilegal. Ahora es un fallo más.
+        var ctx = Stores();
+        var plan = new Plan
+        {
+            Goal = "Slow thing",
+            Requirements = new[] { "Slow thing" },
+            Tasks = new List<AgentTask> { new() { Title = "Slow thing", Description = "Slow" } },
+        };
+        var sessionId = await SeedAsync(ctx, plan);
+        var options = Options.Create(new CaAIAOptions
+        {
+            Execution = new ExecutionSettings
+            {
+                OperationTimeoutSeconds = 1,
+                GlobalTimeoutMinutes = 1,
+                HeartbeatSeconds = 5,
+                ToolTimeoutSeconds = 10,
+            },
+        });
+        var engine = new AgentExecutionEngine(sessionId, ctx.Sessions, ctx.Plans, ctx.Checkpoints,
+            ctx.Events,
+            new ScriptedExecutor(async ct =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), ct);
+                return new TaskExecutionOutcome(true);
+            }),
+            new SatisfiedVerifier(), new NeverRepairPolicy(), options,
+            NullLogger<AgentExecutionEngine>.Instance);
+
+        await engine.RunAsync(sessionId, CancellationToken.None);
+        Assert.Equal(AgentState.Failed, engine.StateMachine.Current);
+
+        // Reutilizable: el segundo Run no lanza transición ilegal.
+        await engine.RunAsync(sessionId, CancellationToken.None);
+        Assert.Equal(AgentState.Failed, engine.StateMachine.Current);
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
     public void FilterAlreadyAddressed_SkipsDuplicateGaps()
     {
         var plan = new Plan
@@ -405,6 +448,12 @@ public sealed class EngineTests : IDisposable
         private readonly Domain.Execution.IRepairPolicy _inner = new CaAIA.Agent.Policies.DefaultRepairPolicy();
         public bool ShouldRepair(FailureCategory category, int attempts, int maxAttempts) =>
             _inner.ShouldRepair(category, attempts, maxAttempts);
+        public TimeSpan DelayBeforeRetry(FailureCategory category, int attempts) => TimeSpan.Zero;
+    }
+
+    private sealed class NeverRepairPolicy : IRepairPolicy
+    {
+        public bool ShouldRepair(FailureCategory category, int attempts, int maxAttempts) => false;
         public TimeSpan DelayBeforeRetry(FailureCategory category, int attempts) => TimeSpan.Zero;
     }
 }

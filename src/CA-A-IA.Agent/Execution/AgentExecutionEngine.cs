@@ -40,7 +40,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
     private readonly SemaphoreSlim _runGate = new(1, 1);
     private Timer? _heartbeat;
     private Timer? _watchdog;
-    private DateTimeOffset _lastProgressUtc = DateTimeOffset.UtcNow;
+    private long _lastProgressTicks = DateTimeOffset.UtcNow.Ticks;
     private Guid? _currentTaskId;
     private Plan? _activePlan;
     private int _auditRounds;
@@ -98,8 +98,6 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
         StartWatchdog();
         try
         {
-            await Go(AgentState.PreparingExecution, "run started", ct).ConfigureAwait(false);
-
             Plan plan;
             try
             {
@@ -114,6 +112,17 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
                 await GoSafeAsync(AgentState.Failed, $"startup failed: {ex.Message}").ConfigureAwait(false);
                 return;
             }
+
+            // Reintento tras terminal/pausa (Failed/Cancelled/Completed/Paused): pasar
+            // por Idle, único puente legal hacia PreparingExecution. Sin esto, el 2º
+            // Run moría con transición ilegal aunque el plan volviera a estar aprobado.
+            if (_machine.Current is AgentState.Failed or AgentState.Cancelled
+                or AgentState.Completed or AgentState.Paused or AgentState.Recovering)
+            {
+                await Go(AgentState.Idle, "run restarted", ct).ConfigureAwait(false);
+            }
+
+            await Go(AgentState.PreparingExecution, "run started", ct).ConfigureAwait(false);
 
             _activePlan = plan;
             _auditRounds = 0;
@@ -160,7 +169,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
             if (!AgentTransitions.Terminal.Contains(_machine.Current))
             {
                 _machine.TransitionTo(next, reason);
-                _lastProgressUtc = DateTimeOffset.UtcNow;
+                TouchProgress();
             }
 
             await CheckpointAsync(reason).ConfigureAwait(false);
@@ -255,7 +264,17 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
             using var opTimeout = new CancellationTokenSource(
                 TimeSpan.FromSeconds(Math.Max(10, _settings.OperationTimeoutSeconds)));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, opTimeout.Token);
+            using var pump = new ProgressPump(TouchProgress, TimeSpan.FromSeconds(30));
             outcome = await _executor.ExecuteTaskAsync(plan, task, linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Timeout de la operación (opTimeout), NO pausa/cancelación: antes se
+            // relanzaba, escapaba de RunAsync y envenenaba el motor (sin estado
+            // terminal y siguiente Run ilegal). Ahora es un fallo clasificable.
+            outcome = new TaskExecutionOutcome(false,
+                $"Task exceeded operation timeout of {_settings.OperationTimeoutSeconds}s.",
+                FailureCategory.ToolFailure);
         }
         catch (OperationCanceledException)
         {
@@ -314,6 +333,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
 
             try
             {
+                using var pump = new ProgressPump(TouchProgress, TimeSpan.FromSeconds(30));
                 outcome = await _executor.ExecuteTaskAsync(plan, task, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -490,8 +510,34 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
     {
         ct.ThrowIfCancellationRequested();
         _machine.TransitionTo(next, reason);
-        _lastProgressUtc = DateTimeOffset.UtcNow;
+        TouchProgress();
         await CheckpointAsync(reason).ConfigureAwait(false);
+    }
+
+    /// <summary>Marca progreso (transiciones, latido de tarea en vuelo).</summary>
+    private void TouchProgress() =>
+        Interlocked.Exchange(ref _lastProgressTicks, DateTimeOffset.UtcNow.Ticks);
+
+    /// <summary>
+    /// Latido mientras una llamada al ejecutor/proveedor sigue en vuelo: evita que
+    /// el watchdog falle una tarea lenta pero viva (p. ej. turno largo en OpenCode).
+    /// El timeout de operación sigue acotando de verdad.
+    /// </summary>
+    private sealed class ProgressPump : IDisposable
+    {
+        private readonly Timer _timer;
+        public ProgressPump(Action beat, TimeSpan period) =>
+            _timer = new Timer(_ =>
+            {
+                try
+                {
+                    beat();
+                }
+                catch (Exception)
+                {
+                }
+            }, null, period, period);
+        public void Dispose() => _timer.Dispose();
     }
 
     private void GoSync(AgentState next, string? reason)
@@ -567,7 +613,8 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
     /// Público como API de observabilidad (el timer lo evalúa periódicamente).
     /// </summary>
     public bool IsStalledAt(DateTimeOffset now) =>
-        now - _lastProgressUtc > TimeSpan.FromSeconds(Math.Max(10, _settings.StallDetectionSeconds));
+        now - new DateTimeOffset(Volatile.Read(ref _lastProgressTicks), TimeSpan.Zero)
+            > TimeSpan.FromSeconds(Math.Max(10, _settings.StallDetectionSeconds));
 
     private void StartWatchdog()
     {

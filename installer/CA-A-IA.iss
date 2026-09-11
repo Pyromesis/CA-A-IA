@@ -1,4 +1,4 @@
-; CA-A-IA — Instalador Inno Setup (firma CA).
+﻿; CA-A-IA — Instalador Inno Setup (firma CA).
 ; Compilar con: installer\Build-Installer.ps1 (publica la app, resuelve la
 ; versión desde Directory.Build.props y llama a ISCC con los defines).
 ;   ISCC.exe installer\CA-A-IA.iss /DPublishDir="..." /DAppVersion="0.1.0" [/DUSE_CODESIGN] [/S"casign=..."]
