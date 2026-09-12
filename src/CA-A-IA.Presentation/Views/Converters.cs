@@ -143,6 +143,34 @@ public sealed class MemoryNodeKindBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>bool → Visible/Collapsed (parámetro "invert" invierte).</summary>
+public sealed class BoolToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var show = value is true;
+        if ((parameter as string) == "invert")
+        {
+            show = !show;
+        }
+
+        return show ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Carpeta expandida → ⌄, plegada → ›.</summary>
+public sealed class ExpandGlyphConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is true ? "\uE70D" : "\uE76C";
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>Recuento == 0 → Visible (paneles de estado vacío). Con parámetro "invert" invierte.</summary>
 public sealed class ZeroCountToVisibilityConverter : IValueConverter
 {

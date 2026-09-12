@@ -347,7 +347,9 @@ public sealed class OpenUrlTool : ITool
             var browser = doc.RootElement.TryGetProperty("browser", out var b)
                 && b.ValueKind == JsonValueKind.String ? b.GetString() : null;
             await _ui.OpenUrlAsync(url, browser, cancellationToken).ConfigureAwait(false);
-            return WriteFileTool.Ok(invocation, $"Opened {url}.", sw);
+            return WriteFileTool.Ok(invocation,
+                $"Opened {url}. Tip: if the site is already open in another tab, reuse it " +
+                "(Ctrl+Tab) instead of opening duplicates.", sw);
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
         {

@@ -325,6 +325,8 @@ public sealed class LlmTaskExecutor : ITaskExecutor
               UiWaitWindow waits for something to appear instead of guessing timing.
               - After acting, VERIFY with UiActiveWindow: if the wrong app opened, close
               it (Alt+F4 via UiPressKey) and correct course instead of piling clicks.
+              - One tab per site: never open the same site twice. If it is already open,
+              switch to that tab (Ctrl+Tab via UiPressKey) instead of UiOpenUrl again.
               - Your eyes: UiScreenshot captures the screen and the image is attached to
               your next message automatically (vision-capable model required). Screenshot
               after navigating or clicking something important, LOOK at it, and only then

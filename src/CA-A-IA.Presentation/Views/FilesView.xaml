@@ -6,6 +6,8 @@
     <UserControl.Resources>
         <local:FileTreeItemGlyphConverter x:Key="TreeGlyph" />
         <local:FileTreeItemBrushConverter x:Key="TreeBrush" />
+        <local:BoolToVisibilityConverter x:Key="BoolVisibility" />
+        <local:ExpandGlyphConverter x:Key="ExpandGlyph" />
         <local:ZeroCountToVisibilityConverter x:Key="EmptyVisibility" />
         <local:NonZeroCountToVisibilityConverter x:Key="ListVisibility" />
     </UserControl.Resources>
@@ -41,31 +43,47 @@
         <Grid Grid.Row="2">
             <Border Style="{StaticResource CardPanelStyle}" Padding="6"
                     Visibility="{x:Bind ViewModel.FileCount, Mode=OneWay, Converter={StaticResource ListVisibility}}">
-                <TreeView ItemsSource="{x:Bind ViewModel.FileTree, Mode=OneWay}"
+                <ListView x:Name="FilesRoot" ItemsSource="{x:Bind ViewModel.VisibleRows, Mode=OneWay}"
                           SelectionMode="None">
-                    <TreeView.ItemContainerTransitions>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0,1" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemContainerTransitions>
                         <TransitionCollection>
                             <EntranceThemeTransition IsStaggeringEnabled="True" />
                         </TransitionCollection>
-                    </TreeView.ItemContainerTransitions>
-                    <TreeView.ItemTemplate>
+                    </ListView.ItemContainerTransitions>
+                    <ListView.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel Orientation="Horizontal" Spacing="10" Padding="0,5"
-                                        ToolTipService.ToolTip="{Binding Content.FullPath}">
-                                <FontIcon Glyph="{Binding Content, Converter={StaticResource TreeGlyph}}"
+                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                        Margin="{Binding Indent}"
+                                        ToolTipService.ToolTip="{Binding FullPath}">
+                                <Button Content="{Binding IsExpanded, Converter={StaticResource ExpandGlyph}}"
+                                        FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                        Command="{Binding ElementName=FilesRoot, Path=DataContext.ToggleCommand}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding IsDirectory, Converter={StaticResource BoolVisibility}}"
+                                        Style="{StaticResource AppGhostButtonStyle}"
+                                        Padding="6,2" MinWidth="0" MinHeight="0"
+                                        VerticalAlignment="Center"
+                                        AutomationProperties.Name="Plegar o desplegar" />
+                                <FontIcon Glyph="{Binding Item, Converter={StaticResource TreeGlyph}}"
                                           FontSize="16"
-                                          Foreground="{Binding Content, Converter={StaticResource TreeBrush}}"
+                                          Foreground="{Binding Item, Converter={StaticResource TreeBrush}}"
                                           VerticalAlignment="Center" />
                                 <StackPanel Spacing="0" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Content.Name}" FontSize="13"
+                                    <TextBlock Text="{Binding Name}" FontSize="13"
                                                IsTextSelectionEnabled="True" />
-                                    <TextBlock Text="{Binding Content.Meta}"
+                                    <TextBlock Text="{Binding Meta}"
                                                Style="{StaticResource FaintCaptionStyle}" FontSize="11" />
                                 </StackPanel>
                             </StackPanel>
                         </DataTemplate>
-                    </TreeView.ItemTemplate>
-                </TreeView>
+                    </ListView.ItemTemplate>
+                </ListView>
             </Border>
             <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center"
                         Visibility="{x:Bind ViewModel.FileCount, Mode=OneWay, Converter={StaticResource EmptyVisibility}}">

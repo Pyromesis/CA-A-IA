@@ -128,3 +128,57 @@ public static class FileTreeBuilder
         bytes < 1024 * 1024 ? $"{bytes / 1024.0:F1} KB" :
         $"{bytes / (1024.0 * 1024):F1} MB";
 }
+
+/// <summary>Un nodo aplanado con su profundidad (para lista con indentación).</summary>
+public sealed record FlatFileNode(FileTreeItem Item, int Depth);
+
+/// <summary>Vista plana de un árbol (preorden). Pura y testeable.</summary>
+public static class FlatFileTree
+{
+    /// <summary>Todos los nodos en preorden con profundidad (raíz = 0).</summary>
+    public static IReadOnlyList<FlatFileNode> Flatten(FileTreeNode root)
+    {
+        var result = new List<FlatFileNode>();
+        Walk(root, 0, result);
+        return result;
+    }
+
+    private static void Walk(FileTreeNode node, int depth, List<FlatFileNode> result)
+    {
+        result.Add(new FlatFileNode(node.Item, depth));
+        foreach (var child in node.Children)
+        {
+            Walk(child, depth + 1, result);
+        }
+    }
+
+    /// <summary>
+    /// Subconjunto visible: un nodo se muestra si todos sus ancestros están
+    /// expandidos (la raíz siempre). Puro y testeable.
+    /// </summary>
+    public static IReadOnlyList<FlatFileNode> VisibleOnly(
+        IReadOnlyList<FlatFileNode> all, IReadOnlySet<string> expandedIds)
+    {
+        var visible = new List<FlatFileNode>();
+        var hiddenDepth = -1;
+        foreach (var node in all)
+        {
+            if (hiddenDepth >= 0 && node.Depth > hiddenDepth)
+            {
+                continue;
+            }
+
+            hiddenDepth = -1;
+            visible.Add(node);
+            if (node.Item.IsDirectory && !expandedIds.Contains(Key(node)))
+            {
+                hiddenDepth = node.Depth;
+            }
+        }
+
+        return visible;
+    }
+
+    /// <summary>Clave estable de un nodo aplanado (ruta completa).</summary>
+    public static string Key(FlatFileNode node) => node.Item.FullPath;
+}

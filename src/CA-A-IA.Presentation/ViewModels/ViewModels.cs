@@ -1830,6 +1830,30 @@ public sealed partial class TasksViewModel : ObservableObject, IDisposable
     }
 }
 
+/// <summary>Panel de archivos: explora el workspace como árbol expandible.</summary>
+public sealed partial class FlatFileRowVm : ObservableObject
+{
+    public Application.Services.FlatFileNode Node { get; }
+
+    [ObservableProperty]
+    private bool _isExpanded;
+
+    public FlatFileRowVm(Application.Services.FlatFileNode node, bool expanded)
+    {
+        Node = node;
+        _isExpanded = expanded;
+    }
+
+    public bool IsDirectory => Node.Item.IsDirectory;
+    public string Name => Node.Item.Name;
+    public string Meta => Node.Item.Meta;
+    public string FullPath => Node.Item.FullPath;
+    public Application.Services.FileTreeItem Item => Node.Item;
+
+    /// <summary>Indentación por profundidad (la raíz no indenta).</summary>
+    public Microsoft.UI.Xaml.Thickness Indent => new(Node.Depth * 22, 0, 0, 0);
+}
+
 /// <summary>Panel de archivos: explora el workspace compartido (lectura).</summary>
 public sealed partial class FilesViewModel : ObservableObject
 {
@@ -1839,12 +1863,10 @@ public sealed partial class FilesViewModel : ObservableObject
     private readonly Diagnostics.UiFlightRecorder _flight; // TEMPORARY-DIAGNOSTIC
     private CancellationTokenSource? _refreshCts;
 
-    private ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode> _fileTree = new();
-    public ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode> FileTree
-    {
-        get => _fileTree;
-        private set => SetProperty(ref _fileTree, value);
-    }
+    private List<FlatFileRowVm> _allRows = new();
+    private readonly HashSet<string> _expandedIds = new(StringComparer.Ordinal);
+
+    public ObservableCollection<FlatFileRowVm> VisibleRows { get; } = new();
 
     public string WorkspacePath => _prefs.WorkspacePath;
 
@@ -1917,10 +1939,22 @@ public sealed partial class FilesViewModel : ObservableObject
                 () => Application.Services.FileTreeBuilder.Build(
                     workspace, context.Fragments.Select(f => f.Source)), loadCt)
                 .ConfigureAwait(false);
+            var flat = Application.Services.FlatFileTree.Flatten(tree);
 
             await RunOnUiAsync(() =>
             {
-                FileTree = MapToNodes(tree);
+                // Abierto por defecto hasta profundidad 1: el contenido se ve
+                // sin clicks (antes el TreeView solo mostraba la carpeta).
+                _expandedIds.Clear();
+                foreach (var node in flat)
+                {
+                    if (node.Item.IsDirectory && node.Depth <= 1)
+                    {
+                        _expandedIds.Add(Application.Services.FlatFileTree.Key(node));
+                    }
+                }
+
+                RebuildVisibleRows(flat);
                 FileCount = tree.Item.DescendantFiles;
                 StatusText = $"{FileCount} archivos.";
             }).ConfigureAwait(false);
@@ -1947,31 +1981,47 @@ public sealed partial class FilesViewModel : ObservableObject
         }
     }
 
-    private static ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode> MapToNodes(
-        Application.Services.FileTreeNode root)
+    /// <summary>Pliega/despliega una carpeta del árbol.</summary>
+    [RelayCommand]
+    private void Toggle(FlatFileRowVm? row)
     {
-        var nodes = new ObservableCollection<Microsoft.UI.Xaml.Controls.TreeViewNode>
+        if (row is null || !row.IsDirectory)
         {
-            MapNode(root, depth: 0),
-        };
-        return nodes;
-    }
-
-    private static Microsoft.UI.Xaml.Controls.TreeViewNode MapNode(
-        Application.Services.FileTreeNode node, int depth)
-    {
-        // Raíz y primer nivel abiertos: se ve la estructura sin clicks.
-        var treeNode = new Microsoft.UI.Xaml.Controls.TreeViewNode
-        {
-            Content = node.Item,
-            IsExpanded = depth <= 1,
-        };
-        foreach (var child in node.Children)
-        {
-            treeNode.Children.Add(MapNode(child, depth + 1));
+            return;
         }
 
-        return treeNode;
+        row.IsExpanded = !row.IsExpanded;
+        var key = Application.Services.FlatFileTree.Key(
+            new Application.Services.FlatFileNode(row.Item, 0));
+        if (row.IsExpanded)
+        {
+            _expandedIds.Add(key);
+        }
+        else
+        {
+            _expandedIds.Remove(key);
+        }
+
+        RebuildVisibleRows(_allRows.Select(r => r.Node).ToList());
+    }
+
+    private void RebuildVisibleRows(IReadOnlyList<Application.Services.FlatFileNode> flat)
+    {
+        // FlatFileNode/FileTreeItem son records: igualdad por valor, sin líos.
+        _allRows = flat
+            .Select(n => new FlatFileRowVm(n,
+                !n.Item.IsDirectory || _expandedIds.Contains(Application.Services.FlatFileTree.Key(n))))
+            .ToList();
+        var visible = new HashSet<Application.Services.FlatFileNode>(
+            Application.Services.FlatFileTree.VisibleOnly(flat, _expandedIds));
+        VisibleRows.Clear();
+        foreach (var row in _allRows)
+        {
+            if (visible.Contains(row.Node))
+            {
+                VisibleRows.Add(row);
+            }
+        }
     }
 
     private Task RunOnUiAsync(Action action)
