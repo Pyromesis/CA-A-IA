@@ -3,6 +3,7 @@
 // pausas: nada de saltos instantáneos de robot.
 
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using CaAIA.Domain.Interaction;
 
 namespace CaAIA.Infrastructure.Process;
@@ -11,6 +12,7 @@ namespace CaAIA.Infrastructure.Process;
 /// <see cref="IUiAutomation"/> con Win32 SendInput. Monitor principal; toda
 /// coordenada se recorta a la pantalla. Los delays observan el token.
 /// </summary>
+[SupportedOSPlatform("windows6.1")]
 public sealed class UiAutomation : IUiAutomation
 {
     private const int SM_CXSCREEN = 0;

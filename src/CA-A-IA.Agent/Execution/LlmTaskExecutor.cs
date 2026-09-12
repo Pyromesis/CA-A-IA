@@ -326,6 +326,21 @@ public sealed class LlmTaskExecutor : ITaskExecutor
               - Files you create go inside the workspace with absolute paths.
               """
             : string.Empty;
+        var memory = tools.Any(t => t.Id is "VaultWrite" or "VaultRead" or "VaultSearch")
+            ? """
+              - Project memory (.ca-a-ia/*.md, Obsidian-style [[links]]): BEFORE deciding,
+              search it (VaultSearch) and read what matters (VaultRead) — prior decisions
+              live there. Record durable learnings/decisions with VaultWrite and link
+              notes together. Never store secrets there.
+              """
+            : string.Empty;
+        var web = tools.Any(t => t.Id is "WebSearch" or "WebFetch")
+            ? """
+              - Web access: when you lack current or external knowledge, WebSearch first
+              (top hits), then WebFetch the page (text, truncated). Cite URLs. NEVER put
+              workspace secrets, keys or tokens in queries or fetched URLs.
+              """
+            : string.Empty;
         return $"""
             You are CA-A-IA, an autonomous coding agent working in the workspace:
             {workspace}
@@ -334,7 +349,7 @@ public sealed class LlmTaskExecutor : ITaskExecutor
             - Work ONLY inside the workspace using absolute paths. Never touch anything outside.
             - Use the available tools ({tools.Count}: {string.Join(", ", tools.Select(t => t.Id))}) to inspect, edit, build and test. Do not guess file contents.
             - For ExecuteCommand, always set workdir to the workspace path.
-            {autonomy}- Verify your work: build the project and run relevant tests before finishing.
+            {autonomy}{memory}{web}- Verify your work: build the project and run relevant tests before finishing.
             - When the task is done, reply with a concise summary including: files changed, build result, test result, and how each acceptance criterion is met.
             - If blocked by a permission denial, explain and stop that approach instead of retrying it.
             """;

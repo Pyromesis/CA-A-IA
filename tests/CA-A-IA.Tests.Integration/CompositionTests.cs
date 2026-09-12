@@ -59,7 +59,7 @@ public sealed class CompositionTests : IDisposable
         Assert.Contains("openrouter", ids);
 
         var tools = provider.GetRequiredService<IToolRegistry>();
-        Assert.Equal(18, tools.ListDefinitions().Count); // Read, List, Write, Edit, Execute, Search×2 + UI×11
+        Assert.Equal(24, tools.ListDefinitions().Count); // Read, List, Write, Edit, Execute, Search×2 + UI×11 + Vault×4 + Web×2
         Assert.Contains(tools.ListDefinitions(), d => d.RequiredPermissions.HasFlag(ToolPermission.ProcessControl));
 
         // OpenCode local: sin binario, indisponible con mensaje accionable (no vacío mudo);

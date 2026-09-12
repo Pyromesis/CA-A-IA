@@ -50,7 +50,9 @@ public static class InfrastructureServiceExtensions
 
         // Utilidades
         services.AddSingleton<Process.ProcessRunner>();
+#pragma warning disable CA1416 // UiAutomation es Windows-only; la app solo corre en Windows.
         services.AddSingleton<Domain.Interaction.IUiAutomation, Process.UiAutomation>();
+#pragma warning restore CA1416
         services.AddSingleton<Domain.Process.ICommandRunner, Process.CommandRunnerAdapter>();
         services.AddSingleton<WorkspaceReader>();
         services.AddSingleton<IGitService, ProcessGitService>();
@@ -119,6 +121,23 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<ITool, Tools.WaitForActiveWindowTool>();
 
         services.AddSingleton<ITool, Tools.ScreenshotTool>();
+
+        services.AddSingleton<ITool, Tools.VaultWriteTool>();
+
+        services.AddSingleton<ITool, Tools.VaultReadTool>();
+
+        services.AddSingleton<ITool, Tools.VaultSearchTool>();
+
+        services.AddSingleton<ITool, Tools.VaultGraphTool>();
+
+        static HttpClient WebHttpClient() => new(new SocketsHttpHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            MaxAutomaticRedirections = 3,
+        });
+        services.AddSingleton<ITool, Tools.WebSearchTool>(_ => new Tools.WebSearchTool(WebHttpClient()));
+        services.AddSingleton<ITool, Tools.WebFetchTool>(_ => new Tools.WebFetchTool(WebHttpClient()));
         // Adaptadores de proveedor (auto-registro)
         services.AddSingleton<OpenCodeProvider>();
         services.AddSingleton<OpenRouterProvider>();

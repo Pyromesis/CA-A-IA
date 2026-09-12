@@ -37,12 +37,12 @@ public sealed class ToolPermissionService : IToolPermissionService
                 }
             }
 
-            // Solo escritura/ejecución piden confirmación; la lectura se autoriza sin
+            // Solo escritura/ejecución/red piden confirmación; la lectura se autoriza sin
             // interrumpir (pero sus rutas ya quedaron validadas contra el scope arriba).
             var needsConfirmation =
                 (definition.RequiredPermissions & (ToolPermission.Write | ToolPermission.Delete)) != 0
                     ? scope.RequireConfirmationForWrite
-                    : (definition.RequiredPermissions & ToolPermission.Execute) != 0
+                    : (definition.RequiredPermissions & (ToolPermission.Execute | ToolPermission.Network)) != 0
                         ? scope.RequireConfirmationForExecute
                         : false;
 
