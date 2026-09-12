@@ -40,6 +40,12 @@ public interface ISessionCoordinator
     Task<PlanDto> AnswerQuestionAsync(Guid planId, Guid questionId, string answer, CancellationToken cancellationToken);
     Task RunAsync(Guid sessionId, CancellationToken cancellationToken);
     Task PauseAsync(Guid sessionId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// "Seguir" sin finalizar: reencola lo a medias con la indicación del usuario
+    /// y deja un motor fresco listo para continuar. Devuelve tareas reencoladas.
+    /// </summary>
+    Task<int> NudgeAsync(Guid sessionId, string instruction, CancellationToken cancellationToken);
     Task ResumeAsync(Guid sessionId, CancellationToken cancellationToken);
     Task CancelAsync(Guid sessionId, CancellationToken cancellationToken);
     Task<IReadOnlyList<SessionDto>> ListActiveSessionsAsync(CancellationToken cancellationToken);

@@ -572,10 +572,11 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     /// <summary>Vuelve a la conversación en vivo (tras ver el historial).</summary>
     public Task RestoreLiveAsync(CancellationToken ct) => LoadHistoryAsync(ct);
 
-    /// <summary>Muestra una conversación del historial (no se re-persiste).</summary>
+    /// <summary>Muestra SOLO esa conversación (sin separadores ni restos de otras).</summary>
     public async Task LoadConversationAsync(ConversationSegment segment)
     {
         var items = segment.Messages
+            .Where(m => !ConversationHistory.IsDivider(m))
             .Select(m => new ChatMessage(FromStoredRole(m.Role), m.Text, m.At))
             .ToList();
         await RunOnUiAsync(() =>
@@ -645,11 +646,18 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Empieza una conversación: separador visible (también queda en el historial).</summary>
+    /// <summary>
+    /// Empieza una conversación LIMPIA: la vista queda vacía con solo el
+    /// separador (el historial anterior sigue en la BD y en Historial).
+    /// </summary>
     [RelayCommand]
     private async Task NewConversationAsync(CancellationToken ct)
     {
-        await RestoreLiveAsync(ct).ConfigureAwait(false);
+        await RunOnUiAsync(() =>
+        {
+            _viewingHistory = false;
+            Messages.Clear();
+        }).ConfigureAwait(false);
         AddMessage(new ChatMessage(ChatRole.System, ConversationHistory.DividerText, DateTimeOffset.Now));
     }
 
@@ -1118,6 +1126,57 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         }
 
         IsAgentPaused = false;
+    }
+
+    /// <summary>
+    /// 🧭 Seguir sin finalizar: si la IA se queda pensando o en bucle, reencola lo
+    /// a medias con tu instrucción y continúa. Usa el Input si escribiste algo.
+    /// </summary>
+    [RelayCommand]
+    private async Task NudgeAsync(CancellationToken ct)
+    {
+        var sessionId = _sessions.CurrentSessionId;
+        if ((!IsAgentWorking && !IsAgentPaused) || sessionId is null || IsBusy)
+        {
+            return;
+        }
+
+        var instruction = string.IsNullOrWhiteSpace(Input)
+            ? "Sigue con la tarea, no te quedes atascado: prueba otro enfoque y continúa."
+            : Input.Trim();
+        if (!string.IsNullOrWhiteSpace(Input))
+        {
+            Input = string.Empty;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var requeued = await _coordinator.NudgeAsync(sessionId.Value, instruction, ct)
+                .ConfigureAwait(true);
+            AddMessage(new ChatMessage(ChatRole.System, "🧭 " + instruction, DateTimeOffset.Now));
+            if (requeued == 0)
+            {
+                AddMessage(new ChatMessage(ChatRole.Agent,
+                    "Nada a medias: continúo con lo pendiente.", DateTimeOffset.Now));
+            }
+
+            await Task.Run(() => _coordinator.RunAsync(sessionId.Value, CancellationToken.None), ct)
+                .ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent, "Seguimiento cancelado.", DateTimeOffset.Now));
+        }
+        catch (Exception ex)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent, $"No pude continuar: {ex.Message}", DateTimeOffset.Now));
+        }
+        finally
+        {
+            IsBusy = false;
+            SendCommand.NotifyCanExecuteChanged();
+        }
     }
 
     /// <summary>

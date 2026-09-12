@@ -38,6 +38,7 @@ public sealed partial class MainWindow : Window
         _ = App.Services.GetRequiredService<PlanViewModel>();
         _ = App.Services.GetRequiredService<TasksViewModel>();
         _ = App.Services.GetRequiredService<FilesViewModel>();
+        _ = App.Services.GetRequiredService<MemoriaViewModel>();
         _ = App.Services.GetRequiredService<OutputViewModel>();
         _ = App.Services.GetRequiredService<SettingsViewModel>();
     }
@@ -61,6 +62,7 @@ public sealed partial class MainWindow : Window
             "plan" => App.Services.GetRequiredService<PlanView>(),
             "tasks" => App.Services.GetRequiredService<TasksView>(),
             "files" => App.Services.GetRequiredService<FilesView>(),
+            "memoria" => App.Services.GetRequiredService<MemoriaView>(),
             "output" => App.Services.GetRequiredService<OutputView>(),
             "settings" => App.Services.GetRequiredService<SettingsView>(),
             _ => App.Services.GetRequiredService<ChatView>(),
@@ -74,6 +76,7 @@ public sealed partial class MainWindow : Window
             "plan" => "Plan",
             "tasks" => "Tareas",
             "files" => "Archivos",
+            "memoria" => "Memoria",
             "output" => "Salida",
             "settings" => "Ajustes",
             _ => "Chat",
@@ -86,6 +89,7 @@ public sealed partial class MainWindow : Window
             "plan" => "Revisa, pregunta y ejecuta",
             "tasks" => "El paso a paso del plan activo",
             "files" => "Lo que ve el agente en tu carpeta",
+            "memoria" => "La red de conocimiento de la IA",
             "output" => "El diario de la ejecución",
             "settings" => "Claves, modelos y conexión",
             _ => "Habla con tu agente",

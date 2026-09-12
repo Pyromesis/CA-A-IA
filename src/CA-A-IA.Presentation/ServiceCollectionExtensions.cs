@@ -24,6 +24,7 @@ public static class PresentationServiceExtensions
         services.AddSingleton<PlanViewModel>();
         services.AddSingleton<TasksViewModel>();
         services.AddSingleton<FilesViewModel>();
+        services.AddSingleton<MemoriaViewModel>();
         services.AddSingleton<OutputViewModel>();
         services.AddSingleton<SettingsViewModel>();
 
@@ -33,6 +34,7 @@ public static class PresentationServiceExtensions
         services.AddTransient<PlanView>();
         services.AddTransient<TasksView>();
         services.AddTransient<FilesView>();
+        services.AddTransient<MemoriaView>();
         services.AddTransient<OutputView>();
         services.AddTransient<SettingsView>();
 

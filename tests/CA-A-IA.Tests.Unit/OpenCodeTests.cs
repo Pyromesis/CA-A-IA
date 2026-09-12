@@ -272,7 +272,7 @@ public sealed class OpenCodeTests
         Assert.Equal("p1", call.Key);
         Assert.Equal("read", call.Tool);
         Assert.Equal("completed", call.State);
-        Assert.Equal(OpenCodeProvider.MapServerTool("read"), "ReadFile");
+        Assert.Equal("ReadFile", OpenCodeProvider.MapServerTool("read"));
 
         using var text = JsonDocument.Parse("""{"type":"text","text":"hi"}""");
         Assert.Null(OpenCodeServerClient.ParseServerToolPart(text.RootElement, "x"));

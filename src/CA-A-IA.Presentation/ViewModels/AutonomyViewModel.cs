@@ -383,6 +383,49 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
         IsAgentPaused = false;
     }
 
+    /// <summary>
+    /// 🧭 Seguir sin finalizar: reencola lo a medias con tu instrucción y continúa.
+    /// </summary>
+    [RelayCommand]
+    private async Task NudgeAsync(CancellationToken ct)
+    {
+        if ((!IsAgentWorking && !IsAgentPaused) || _autonomySessionId is null || IsBusy)
+        {
+            return;
+        }
+
+        var sessionId = _autonomySessionId.Value;
+        var instruction = string.IsNullOrWhiteSpace(Input)
+            ? "Sigue con la tarea, no te quedes atascado: prueba otro enfoque y continúa."
+            : Input.Trim();
+        if (!string.IsNullOrWhiteSpace(Input))
+        {
+            Input = string.Empty;
+        }
+
+        IsBusy = true;
+        try
+        {
+            await _coordinator.NudgeAsync(sessionId, instruction, ct).ConfigureAwait(true);
+            AddMessage(new ChatMessage(ChatRole.System, "🧭 " + instruction, DateTimeOffset.Now));
+            await Task.Run(() => _coordinator.RunAsync(sessionId, CancellationToken.None), ct)
+                .ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent, "Seguimiento cancelado.", DateTimeOffset.Now));
+        }
+        catch (Exception ex)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent, $"No pude continuar: {ex.Message}", DateTimeOffset.Now));
+        }
+        finally
+        {
+            IsBusy = false;
+            SendCommand.NotifyCanExecuteChanged();
+        }
+    }
+
     private async Task DiscardPausedAsync(CancellationToken ct)
     {
         if (_autonomySessionId is null)

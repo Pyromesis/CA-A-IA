@@ -23,6 +23,9 @@ public sealed class AgentTask
     /// <summary>Criterios de aceptación verificables de ESTA tarea.</summary>
     public IReadOnlyList<string> AcceptanceCriteria { get; init; } = Array.Empty<string>();
 
+    /// <summary>Indicaciones del usuario en marcha ("sigue", correcciones): el prompt las obedece.</summary>
+    public List<string> SteeringNotes { get; } = new();
+
     [JsonInclude] public DateTimeOffset? StartedAt { get; private set; }
     [JsonInclude] public DateTimeOffset? FinishedAt { get; private set; }
     [JsonInclude] public string? LastError { get; private set; }
@@ -113,5 +116,28 @@ public sealed class AgentTask
     {
         Status = AgentTaskStatus.NeedsReview;
         LastError = reason;
+    }
+
+    /// <summary>
+    /// Devuelve una tarea a medias a Pending con una indicación del usuario
+    /// ("sigue, no te quedes ahí"). No toca tareas cerradas ni intentos.
+    /// </summary>
+    public void Requeue(string nudge)
+    {
+        if (Status != AgentTaskStatus.InProgress)
+        {
+            throw new InvalidOperationException(
+                $"Only an InProgress task can be requeued (task '{Title}' is {Status}).");
+        }
+
+        Status = AgentTaskStatus.Pending;
+        StartedAt = null;
+        FinishedAt = null;
+        LastError = null;
+        LastFailureCategory = null;
+        if (!string.IsNullOrWhiteSpace(nudge))
+        {
+            SteeringNotes.Add(nudge.Trim());
+        }
     }
 }

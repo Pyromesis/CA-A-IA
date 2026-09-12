@@ -18,6 +18,7 @@ public sealed class UiAutomationToolsTests
         public readonly List<string> Calls = new();
         public ScreenSize Screen { get; set; } = new(1920, 1080);
         public ScreenSize GetScreenSize() => Screen;
+        public int GetMouseSpeed() => 10;
         public (int X, int Y) GetMousePosition() => (10, 20);
         public Task MoveMouseAsync(int x, int y, bool humanize, CancellationToken ct)
         {
@@ -172,7 +173,8 @@ public sealed class UiAutomationToolsTests
         var result = await new GetScreenSizeTool(new FakeUi()).ExecuteAsync(
             Invoke(GetScreenSizeTool.ToolId, "{}"), CancellationToken.None);
         Assert.True(result.Success);
-        Assert.Equal("1920x1080", result.Output);
+        Assert.Contains("1920x1080", result.Output);
+        Assert.Contains("mouse speed 10/20", result.Output);
     }
 
     [Fact]
@@ -231,7 +233,7 @@ public sealed class UiAutomationToolsTests
             Invoke(ScreenshotTool.ToolId, "{}"), CancellationToken.None);
         Assert.True(result.Success, result.Error);
         Assert.Equal(@"C:\tmp\shot-1.png", result.AttachmentPath);
-        Assert.Contains(result.AttachmentPath, result.Output);
+        Assert.Contains(result.AttachmentPath ?? string.Empty, result.Output);
     }
 
     [Theory]

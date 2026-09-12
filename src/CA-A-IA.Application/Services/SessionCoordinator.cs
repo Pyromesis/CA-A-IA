@@ -126,6 +126,43 @@ public sealed class SessionCoordinator : ISessionCoordinator
         await engine.ResumeAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<int> NudgeAsync(Guid sessionId, string instruction, CancellationToken cancellationToken)
+    {
+        var session = await _sessionsStore.LoadAsync(sessionId, cancellationToken).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException($"Session {sessionId} not found.");
+        if (session.PlanId is null)
+        {
+            throw new InvalidOperationException("Session has no plan to continue.");
+        }
+
+        var plan = await _plans.LoadAsync(session.PlanId.Value, cancellationToken).ConfigureAwait(false)
+            ?? throw new KeyNotFoundException($"Plan {session.PlanId} not found.");
+        var requeued = plan.RequeueInflight(instruction);
+        await _plans.SaveAsync(plan, cancellationToken).ConfigureAwait(false);
+
+        // Motor fresco (el anterior puede estar a medias o con el CTS consumido):
+        // se descarta sin duelo y el llamador continúa con RunAsync.
+        try
+        {
+            var engine = _engines.GetOrCreate(sessionId);
+            var state = engine.StateMachine.Current;
+            if (state is not Domain.Enums.AgentState.Completed
+                and not Domain.Enums.AgentState.Failed
+                and not Domain.Enums.AgentState.Cancelled
+                and not Domain.Enums.AgentState.Idle)
+            {
+                await engine.CancelAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception)
+        {
+            // Best-effort: lo importante (plan reencolado) ya está guardado.
+        }
+
+        _engines.Remove(sessionId);
+        return requeued;
+    }
+
     public async Task CancelAsync(Guid sessionId, CancellationToken cancellationToken)
     {
         var engine = _engines.GetOrCreate(sessionId);

@@ -75,6 +75,9 @@ public sealed class LessonStore
     private readonly string _globalFile;
     private readonly ILogger<LessonStore> _log;
 
+    /// <summary>Ruta del fichero global (para la red de memoria).</summary>
+    public string GlobalFilePath => _globalFile;
+
     public LessonStore(IOptions<CaAIAOptions> options, ILogger<LessonStore> log)
     {
         _log = log;

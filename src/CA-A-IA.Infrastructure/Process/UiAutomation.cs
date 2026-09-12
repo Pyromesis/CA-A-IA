@@ -96,6 +96,13 @@ public sealed class UiAutomation : IUiAutomation
     [DllImport("user32.dll")]
     private static extern short VkKeyScan(char ch);
 
+    private const uint SPI_GETMOUSESPEED = 0x0070;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(
+        uint uiAction, uint uiParam, ref int pvParam, uint fWinIni);
+
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
 
@@ -124,6 +131,20 @@ public sealed class UiAutomation : IUiAutomation
 
     public (int X, int Y) GetMousePosition() =>
         GetCursorPos(out var p) ? (p.X, p.Y) : (0, 0);
+
+    public int GetMouseSpeed()
+    {
+        try
+        {
+            var speed = 10;
+            return SystemParametersInfo(SPI_GETMOUSESPEED, 0, ref speed, 0)
+                ? Math.Clamp(speed, 1, 20) : 10;
+        }
+        catch (Exception)
+        {
+            return 10;
+        }
+    }
 
     public async Task MoveMouseAsync(int x, int y, bool humanize, CancellationToken ct)
     {
@@ -165,6 +186,25 @@ public sealed class UiAutomation : IUiAutomation
 
         // Micro-pausa de "dwell" antes de actuar, como un humano que apunta.
         await Task.Delay(Random.Shared.Next(40, 121), ct).ConfigureAwait(false);
+
+        // Closed-loop: el movimiento absoluto no lo afecta la sensibilidad/DPI,
+        // pero los redondeos y el escalado multimonitor sí desvían. Si el cursor
+        // no quedó donde se pidió, corregir hasta 2 veces (rápido, sin humanizar).
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var actual = GetMousePosition();
+            var error = Math.Sqrt(
+                (double)(actual.X - target.X) * (actual.X - target.X)
+                + (double)(actual.Y - target.Y) * (actual.Y - target.Y));
+            if (error <= 2)
+            {
+                break;
+            }
+
+            SendAbsolute(target.X, target.Y, screen);
+            await Task.Delay(30, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Curva suave: arranca y frena despacio, rápido en medio.</summary>

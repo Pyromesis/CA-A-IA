@@ -111,6 +111,38 @@ public sealed class FileTreeItemBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>Clase de nodo de memoria → color (lección ámbar, global azul, nota tenue).</summary>
+public sealed class MemoryNodeKindBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var key = value is Application.Services.MemoryNodeKind kind
+            ? kind switch
+            {
+                Application.Services.MemoryNodeKind.Lesson => "AppBrandBrush",
+                Application.Services.MemoryNodeKind.Global => "AppInfoBrush",
+                _ => "AppMutedText",
+            }
+            : "AppMutedText";
+        try
+        {
+            var resources = Microsoft.UI.Xaml.Application.Current?.Resources;
+            if (resources is not null && resources[key] is Brush b)
+            {
+                return b;
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
 /// <summary>Recuento == 0 → Visible (paneles de estado vacío). Con parámetro "invert" invierte.</summary>
 public sealed class ZeroCountToVisibilityConverter : IValueConverter
 {

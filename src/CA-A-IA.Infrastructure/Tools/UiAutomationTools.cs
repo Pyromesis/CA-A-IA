@@ -28,7 +28,10 @@ public sealed class GetScreenSizeTool : ITool
         try
         {
             var size = _ui.GetScreenSize();
-            return Task.FromResult(WriteFileTool.Ok(invocation, $"{size.Width}x{size.Height}", sw));
+            // La sensibilidad se informa (el movimiento absoluto no la usa, pero
+            // diagnostica si algo se siente raro).
+            return Task.FromResult(WriteFileTool.Ok(invocation,
+                $"{size.Width}x{size.Height}, mouse speed {_ui.GetMouseSpeed()}/20.", sw));
         }
         catch (Exception ex)
         {

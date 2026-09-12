@@ -18,6 +18,10 @@ public interface IUiAutomation
 {
     ScreenSize GetScreenSize();
     (int X, int Y) GetMousePosition();
+
+    /// <summary>Velocidad del puntero de Windows 1-20 (informativo: el movimiento
+    /// absoluto no la usa, pero sirve para diagnosticar).</summary>
+    int GetMouseSpeed();
     Task MoveMouseAsync(int x, int y, bool humanize, CancellationToken cancellationToken);
     Task ClickAsync(string button, bool doubleClick, CancellationToken cancellationToken);
     Task ScrollAsync(int deltaX, int deltaY, CancellationToken cancellationToken);

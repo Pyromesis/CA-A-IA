@@ -107,6 +107,27 @@ public sealed class Plan
         Touch();
     }
 
+    /// <summary>
+    /// Reencola tareas a medias (InProgress→Pending) con una indicación del
+    /// usuario. Devuelve cuántas. No toca cerradas. Para "seguir" sin finalizar.
+    /// </summary>
+    public int RequeueInflight(string nudge)
+    {
+        var count = 0;
+        foreach (var task in Tasks.Where(t => t.Status == AgentTaskStatus.InProgress))
+        {
+            task.Requeue(nudge);
+            count++;
+        }
+
+        if (count > 0)
+        {
+            Touch();
+        }
+
+        return count;
+    }
+
     public bool AllTasksClosed() =>
         Tasks.Count > 0 && Tasks.All(t =>
             t.Status is AgentTaskStatus.Completed or AgentTaskStatus.Skipped);

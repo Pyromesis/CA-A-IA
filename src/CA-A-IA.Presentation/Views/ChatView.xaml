@@ -1,7 +1,14 @@
 <UserControl
     x:Class="CaAIA.Presentation.Views.ChatView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CaAIA.Presentation.Views">
+    <UserControl.Resources>
+        <local:ChatBubbleSelector x:Key="BubbleSelector"
+                                  UserTemplate="{StaticResource UserBubble}"
+                                  AgentTemplate="{StaticResource AgentBubble}"
+                                  SystemTemplate="{StaticResource SystemBubble}" />
+    </UserControl.Resources>
     <Grid RowSpacing="10" Padding="16"
           HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
         <Grid.RowDefinitions>
@@ -143,6 +150,13 @@
                         ToolTipService.ToolTip="Detener del todo"
                         Visibility="{x:Bind ViewModel.StopButtonVisibility, Mode=OneWay}"
                         Padding="8,4" MinWidth="0" />
+                <Button Content="Seguir"
+                        Command="{x:Bind ViewModel.NudgeCommand}"
+                        Style="{StaticResource AppGhostButtonStyle}"
+                        AutomationProperties.Name="Seguir sin finalizar"
+                        ToolTipService.ToolTip="Si se atasca: reencola lo a medias con tu instrucción y continúa"
+                        Visibility="{x:Bind ViewModel.StopButtonVisibility, Mode=OneWay}"
+                        Padding="8,4" />
             </StackPanel>
             <TextBlock Grid.Column="3" Text="{x:Bind ViewModel.ModelsStatus, Mode=OneWay}"
                        Opacity="0.65" FontSize="12" VerticalAlignment="Center" />

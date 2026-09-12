@@ -1,0 +1,145 @@
+<UserControl
+    x:Class="CaAIA.Presentation.Views.MemoriaView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CaAIA.Presentation.Views">
+    <UserControl.Resources>
+        <local:MemoryNodeKindBrushConverter x:Key="NodeBrush" />
+        <local:ZeroCountToVisibilityConverter x:Key="EmptyVisibility" />
+        <local:NonZeroCountToVisibilityConverter x:Key="GraphVisibility" />
+    </UserControl.Resources>
+    <Grid RowSpacing="10" Padding="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Border Grid.Row="0" Style="{StaticResource CardPanelStyle}" Padding="12">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Grid.Column="0" Glyph="&#xE8B7;" FontSize="18"
+                          Foreground="{ThemeResource AppBrandBrush}" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Spacing="0" VerticalAlignment="Center">
+                    <TextBlock Text="RED DE MEMORIA" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
+                    <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                               Opacity="0.85" VerticalAlignment="Center"
+                               TextWrapping="WrapWholeWords" FontSize="12" />
+                    <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Ellipse Width="8" Height="8" Fill="{ThemeResource AppBrandBrush}" />
+                            <TextBlock Text="Lección" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Ellipse Width="8" Height="8" Fill="{ThemeResource AppInfoBrush}" />
+                            <TextBlock Text="Global" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <Ellipse Width="8" Height="8" Fill="{ThemeResource AppMutedText}" />
+                            <TextBlock Text="Nota" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+                <Button Grid.Column="2" Content="Actualizar" Command="{x:Bind ViewModel.RefreshCommand}"
+                        Style="{StaticResource AppGhostButtonStyle}" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+        <TextBlock Grid.Row="1" Text="Arrastra los nodos para mover la red. Toca uno para leerlo."
+                   Style="{StaticResource FaintCaptionStyle}" FontSize="12" />
+        <Grid Grid.Row="2" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" MinWidth="280" />
+                <ColumnDefinition Width="*" MinWidth="220" />
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Style="{StaticResource CardPanelStyle}" Padding="6"
+                    Visibility="{x:Bind ViewModel.Nodes.Count, Mode=OneWay, Converter={StaticResource GraphVisibility}}">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <Grid Width="1000" Height="700">
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.Edges, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <Canvas Width="1000" Height="700" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="Canvas.Left" Value="0" />
+                                    <Setter Property="Canvas.Top" Value="0" />
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Line X1="{Binding X1}" Y1="{Binding Y1}"
+                                          X2="{Binding X2}" Y2="{Binding Y2}"
+                                          Stroke="{ThemeResource AppCardBorder}"
+                                          StrokeThickness="1.5" Opacity="0.9" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.Nodes, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <Canvas Width="1000" Height="700" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="Canvas.Left" Value="{Binding X}" />
+                                    <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="40" Height="40" CornerRadius="20"
+                                            Background="{ThemeResource AppCardBackground}"
+                                            BorderBrush="{Binding Kind, Converter={StaticResource NodeBrush}}"
+                                            BorderThickness="2.5"
+                                            PointerPressed="Node_PointerPressed"
+                                            PointerMoved="Node_PointerMoved"
+                                            PointerReleased="Node_PointerReleased"
+                                            PointerCanceled="Node_PointerReleased"
+                                            PointerCaptureLost="Node_PointerReleased"
+                                            Tapped="Node_Tapped">
+                                        <TextBlock Text="{Binding Title}"
+                                                   FontSize="9" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   TextAlignment="Center" MaxLines="2"
+                                                   TextWrapping="WrapWholeWords" TextTrimming="CharacterEllipsis"
+                                                   Margin="3" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </ScrollViewer>
+            </Border>
+            <StackPanel Grid.Column="0" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="{x:Bind ViewModel.Nodes.Count, Mode=OneWay, Converter={StaticResource EmptyVisibility}}">
+                <FontIcon Glyph="&#xE8B7;" Style="{StaticResource EmptyStateIconStyle}" />
+                <TextBlock Text="Memoria vacía" Style="{StaticResource EmptyStateTitleStyle}" />
+                <TextBlock Text="La bóveda (.ca-a-ia) se crea al trabajar. Dile «recuerda: …» a la IA para empezar."
+                           Style="{StaticResource EmptyStateBodyStyle}" />
+            </StackPanel>
+            <Border Grid.Column="1" Style="{StaticResource CardPanelStyle}" Padding="12">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="VISTA PREVIA" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
+                    <TextBlock Grid.Row="1" Text="{x:Bind ViewModel.SelectedNode.Title, Mode=OneWay, FallbackValue='Nada seleccionado'}"
+                               Style="{StaticResource CardTitleStyle}" TextWrapping="WrapWholeWords" />
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                        <TextBlock Text="{x:Bind ViewModel.SelectedContent, Mode=OneWay}"
+                                   TextWrapping="WrapWholeWords" IsTextSelectionEnabled="True"
+                                   FontSize="12" Opacity="0.9" />
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

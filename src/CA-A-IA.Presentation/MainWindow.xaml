@@ -35,6 +35,7 @@
                 <NavigationViewItem Content="Plan" Tag="plan" Icon="Document" />
                 <NavigationViewItem Content="Tareas" Tag="tasks" Icon="List" />
                 <NavigationViewItem Content="Archivos" Tag="files" Icon="Folder" />
+                <NavigationViewItem Content="Memoria" Tag="memoria" Icon="Share" />
                 <NavigationViewItem Content="Salida" Tag="output" Icon="ShowResults" />
                 <NavigationViewItem Content="Ajustes" Tag="settings" Icon="Setting" />
             </NavigationView.MenuItems>

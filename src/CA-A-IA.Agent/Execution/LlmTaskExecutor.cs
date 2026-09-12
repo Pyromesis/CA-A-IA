@@ -372,13 +372,16 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         var learned = lessons.Count == 0 ? string.Empty :
             "\nLessons learned — DO NOT repeat these mistakes:\n"
             + string.Join("\n", lessons.Take(3)) + "\n";
+        var steering = task.SteeringNotes.Count == 0 ? string.Empty :
+            "\nIndicaciones en marcha (del usuario, obedecer antes que todo):\n"
+            + string.Join("\n", task.SteeringNotes.Take(3).Select(s => "- " + s)) + "\n";
         return $"""
             TASK: {task.Title}
             {task.Description}
 
             Acceptance criteria:
             {string.Join("\n", task.AcceptanceCriteria.Select(c => $"- {c}"))}
-            {learned}
+            {learned}{steering}
             Relevant files ({context.Fragments.Count} shown, {context.TruncatedFragments} truncated):
             {files}
 
