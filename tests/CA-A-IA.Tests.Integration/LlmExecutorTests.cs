@@ -235,6 +235,74 @@ public sealed class LlmExecutorTests : IDisposable
 
     // ---- Doubles ----
 
+    [Fact]
+    public async Task ScreenshotFlow_AttachesImageToNextRequest()
+    {
+        var shot = Path.Combine(Path.GetTempPath(), $"shot-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(shot, new byte[] { 1, 2, 3 });
+        try
+        {
+            var h = Create(new AllowConfirmation(), confirmWrites: false,
+                extraTools: tools => tools.Register(new ShotStub(shot)));
+            var (plan, task) = await SeedAsync(h.Sessions, "Look around");
+            h.Provider.Enqueue(_ => new AIResponse("taking shot",
+                new[] { new AIToolCall("c1", "UiScreenshot", "{}") }, "m", new TokenUsage(1, 1)));
+            h.Provider.Enqueue(req =>
+            {
+                var withImage = req.Messages.Last(m => m.Images.Count > 0);
+                Assert.Contains(shot, withImage.Images);
+                return new AIResponse("I see.", Array.Empty<AIToolCall>(), "m", new TokenUsage(1, 1));
+            });
+            var outcome = await h.Executor.ExecuteTaskAsync(plan, task, CancellationToken.None);
+            Assert.True(outcome.Success, outcome.Error);
+        }
+        finally
+        {
+            File.Delete(shot);
+        }
+    }
+
+    private sealed class ShotStub : ITool
+    {
+        private readonly string _shot;
+        public ShotStub(string shot) => _shot = shot;
+        public ToolDefinition Definition { get; } = new("UiScreenshot", "UiScreenshot", "shot",
+            ToolKind.UiAutomation, ToolPermission.Read, Array.Empty<ToolParameter>(), TimeSpan.FromSeconds(30));
+        public Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken ct) =>
+            Task.FromResult(new ToolResult(invocation.InvocationId, "UiScreenshot", true,
+                "shot", AttachmentPath: _shot));
+    }
+
+    [Fact]
+    public async Task AutoWatch_CapturesAfterUiAction_WithoutAsking()
+    {
+        // El modelo mueve el ratón (herramienta desconocida aquí → Unknown, sin
+        // romper) y el Vigilante adjunta foto igual: el 2º turno la trae.
+        var shot = Path.Combine(Path.GetTempPath(), $"shot-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(shot, new byte[] { 4, 5, 6 });
+        try
+        {
+            var h = Create(new AllowConfirmation(), confirmWrites: false,
+                extraTools: tools => tools.Register(new ShotStub(shot)));
+            var (plan, task) = await SeedAsync(h.Sessions, "Move it");
+            h.Provider.Enqueue(_ => new AIResponse("moving",
+                new[] { new AIToolCall("c1", "UiMoveMouse", """{"x":10,"y":20}""") },
+                "m", new TokenUsage(1, 1)));
+            h.Provider.Enqueue(req =>
+            {
+                var withImage = req.Messages.Last(m => m.Images.Count > 0);
+                Assert.Contains(shot, withImage.Images);
+                return new AIResponse("Seen.", Array.Empty<AIToolCall>(), "m", new TokenUsage(1, 1));
+            });
+            var outcome = await h.Executor.ExecuteTaskAsync(plan, task, CancellationToken.None);
+            Assert.True(outcome.Success, outcome.Error);
+        }
+        finally
+        {
+            File.Delete(shot);
+        }
+    }
+
     private sealed class ScriptedLlmProvider : IAIProvider
     {
         private readonly Queue<Func<AIRequest, AIResponse>> _script = new();

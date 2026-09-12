@@ -110,7 +110,9 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
         _ = Task.Run(PruneOldTempDirs);
         AddMessage(new ChatMessage(ChatRole.System,
             "Pide lo que sea: «abre el navegador y busca…», «organiza mis descargas»… " +
-            "Muevo el ratón y escribo como lo harías tú. Cada pedido usa su propia carpeta temporal. " +
+            "Tres trabajan para ti: uno mueve el ratón y escribe, otro mira la pantalla " +
+            "tras cada acción y el modelo lo analiza todo antes de seguir. Usa un modelo " +
+            "rápido y gratuito para volar. Cada pedido usa su propia carpeta temporal. " +
             "Si me equivoco, dime «recuerda: …» y no lo repetiré.",
             DateTimeOffset.Now), persist: false);
     }

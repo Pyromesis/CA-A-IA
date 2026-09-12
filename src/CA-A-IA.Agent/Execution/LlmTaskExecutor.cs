@@ -154,7 +154,7 @@ public sealed class LlmTaskExecutor : ITaskExecutor
                 ct.ThrowIfCancellationRequested();
                 var result = await InvokeToolAsync(call, tools, scope, correlation, ct).ConfigureAwait(false);
                 if (canSee && result.Success && result.AttachmentPath is { } shot
-                    && carryImages.Count < 2 && !carryImages.Contains(shot, StringComparer.OrdinalIgnoreCase))
+                    && carryImages.Count < 2 && !carryImages.Contains(shot))
                 {
                     try
                     {
@@ -168,6 +168,11 @@ public sealed class LlmTaskExecutor : ITaskExecutor
                     }
                 }
 
+                // Vigilante: tras cada acción UI, foto automática para el próximo
+                // turno (el modelo no gasta una llamada pidiéndola).
+                await AutoCaptureAsync(tools, scope, correlation, call, carryImages, ct)
+                    .ConfigureAwait(false);
+
                 history.Add(new AIMessage(AIRole.Tool,
                     result.Success ? result.Output : $"ERROR [{result.FailureCategory}]: {result.Error}",
                     ToolCallId: call.Id));
@@ -176,6 +181,75 @@ public sealed class LlmTaskExecutor : ITaskExecutor
 
         return new TaskExecutionOutcome(false,
             $"Task did not finish within {maxIterations} tool iterations.", FailureCategory.ToolFailure);
+    }
+
+    /// <summary>
+    /// Vigilante automático (sin IA): tras una acción de ratón/teclado/navegador,
+    /// captura la pantalla para que el próximo turno VEA el resultado. Nunca pide
+    /// confirmación (lectura) y nunca rompe el bucle. Solo en modo autonomía.
+    /// </summary>
+    private async Task AutoCaptureAsync(
+        IReadOnlyCollection<ToolDefinition> tools,
+        ExecutionScope scope,
+        CorrelationContext correlation,
+        AIToolCall call,
+        List<string> carry,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (carry.Count >= 2 || call.ToolName == "UiScreenshot"
+                || !call.ToolName.StartsWith("Ui", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!tools.Any(t => t.Kind == ToolKind.UiAutomation))
+            {
+                return;
+            }
+
+            ITool screenshot;
+            try
+            {
+                screenshot = _tools.Get("UiScreenshot");
+            }
+            catch (KeyNotFoundException)
+            {
+                return;
+            }
+
+            var invocation = new ToolInvocation(Guid.NewGuid(), screenshot.Definition.Id, "{}",
+                correlation, TimeoutOverride: TimeSpan.FromSeconds(20));
+            var decision = _permissions.Authorize(invocation, screenshot.Definition, scope);
+            if (!decision.Allowed || decision.RequiresUserConfirmation)
+            {
+                return;
+            }
+
+            var result = await screenshot.ExecuteAsync(invocation, ct).ConfigureAwait(false);
+            if (result.Success && result.AttachmentPath is { } shot && !carry.Contains(shot))
+            {
+                try
+                {
+                    if (File.Exists(shot))
+                    {
+                        carry.Add(shot);
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Auto screenshot failed (non-fatal).");
+        }
     }
 
     /// <summary>
@@ -327,10 +401,11 @@ public sealed class LlmTaskExecutor : ITaskExecutor
               it (Alt+F4 via UiPressKey) and correct course instead of piling clicks.
               - One tab per site: never open the same site twice. If it is already open,
               switch to that tab (Ctrl+Tab via UiPressKey) instead of UiOpenUrl again.
-              - Your eyes: UiScreenshot captures the screen and the image is attached to
-              your next message automatically (vision-capable model required). Screenshot
-              after navigating or clicking something important, LOOK at it, and only then
-              decide coordinates. Never click blind twice on the same guess.
+              - Your eyes are AUTOMATIC: after every mouse/keyboard/browser action you
+              instantly receive a fresh screenshot attached to your next message
+              (vision-capable model required) — LOOK at it to verify before your next
+              move. Call UiScreenshot only for an extra-fresh capture. Describe in one
+              line what you see and whether the previous action worked.
               - Files you create go inside the workspace with absolute paths.
               """
             : string.Empty;
