@@ -36,6 +36,7 @@ public sealed class LlmTaskExecutor : ITaskExecutor
     private readonly IUserConfirmation _confirmation;
     private readonly IMemoryStore _memory;
     private readonly IEventBus _events;
+    private readonly LessonStore? _lessons;
     private readonly CaAIAOptions _options;
     private readonly ILogger<LlmTaskExecutor> _log;
 
@@ -50,7 +51,8 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         IMemoryStore memory,
         IEventBus events,
         IOptions<CaAIAOptions> options,
-        ILogger<LlmTaskExecutor> log)
+        ILogger<LlmTaskExecutor> log,
+        LessonStore? lessons = null)
     {
         _sessions = sessions;
         _providers = providers;
@@ -63,6 +65,7 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         _events = events;
         _options = options.Value;
         _log = log;
+        _lessons = lessons;
     }
 
     public async Task<TaskExecutionOutcome> ExecuteTaskAsync(Plan plan, AgentTask task, CancellationToken ct)
@@ -108,7 +111,8 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         var history = new List<AIMessage>
         {
             new(AIRole.System, SystemPrompt(session.WorkspacePath, tools)),
-            new(AIRole.User, TaskPrompt(task, context)),
+            new(AIRole.User, TaskPrompt(task, context, await RecallLessonsAsync(session, task, ct)
+                .ConfigureAwait(false))),
         };
 
         var maxIterations = Math.Max(1, _options.Agent.MaxToolIterations);
@@ -218,6 +222,7 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         if (!decision.Allowed)
         {
             _log.LogWarning("Tool {Tool} denied: {Reason}", definition.Id, decision.Reason);
+            LearnDenied(scope, definition, call, "scope");
             return new ToolResult(invocation.InvocationId, definition.Id, false, string.Empty,
                 PermissionDenied: true, FailureCategory: FailureCategory.PermissionFailure, Error: decision.Reason);
         }
@@ -246,6 +251,7 @@ public sealed class LlmTaskExecutor : ITaskExecutor
 
             if (!confirmed)
             {
+                LearnDenied(scope, definition, call, "usuario");
                 return new ToolResult(invocation.InvocationId, definition.Id, false, string.Empty,
                     PermissionDenied: true, FailureCategory: FailureCategory.PermissionFailure,
                     Error: "Denied by user confirmation.");
@@ -355,26 +361,74 @@ public sealed class LlmTaskExecutor : ITaskExecutor
             """;
     }
 
-    private static string TaskPrompt(AgentTask task, ProjectContext context)
+    private static string TaskPrompt(
+        AgentTask task, ProjectContext context, IReadOnlyList<string> lessons)
     {
         var files = string.Join("\n", context.Fragments.Select(f => $"- {f.Source} ({f.Content.Length} chars)"));
         var bodies = string.Join("\n\n", context.Fragments
             .OrderByDescending(f => f.Priority)
             .Take(15)
             .Select(f => $"=== {f.Source} ===\n{Truncate(f.Content, 6000)}"));
+        var learned = lessons.Count == 0 ? string.Empty :
+            "\nLessons learned — DO NOT repeat these mistakes:\n"
+            + string.Join("\n", lessons.Take(3)) + "\n";
         return $"""
             TASK: {task.Title}
             {task.Description}
 
             Acceptance criteria:
             {string.Join("\n", task.AcceptanceCriteria.Select(c => $"- {c}"))}
-
+            {learned}
             Relevant files ({context.Fragments.Count} shown, {context.TruncatedFragments} truncated):
             {files}
 
             File contents:
             {bodies}
             """;
+    }
+
+    /// <summary>Lecciones relevantes para esta tarea (proyecto + globales). Nunca lanza.</summary>
+    private async Task<IReadOnlyList<string>> RecallLessonsAsync(
+        AgentSession session, AgentTask task, CancellationToken ct)
+    {
+        if (_lessons is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        try
+        {
+            return await _lessons.RecallRelevantAsync(
+                session.WorkspacePath, $"{task.Title} {task.Description}", 3, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Lesson recall failed (non-fatal).");
+            return Array.Empty<string>();
+        }
+    }
+
+    private void LearnDenied(
+        ExecutionScope scope, ToolDefinition definition, AIToolCall call, string kind)
+    {
+        if (_lessons is null)
+        {
+            return;
+        }
+
+        var workspace = scope.AllowedPaths.FirstOrDefault();
+        var args = (call.ArgumentsJson ?? string.Empty).Trim();
+        if (args.Length > 120)
+        {
+            args = args[..120].Trim() + "…";
+        }
+
+        _ = _lessons.RecordLessonAsync(workspace, LessonScope.Project,
+            kind == "usuario"
+                ? $"El usuario denegó {definition.Id} ({args}): no proponer ni reintentar esa acción así."
+                : $"Se denegó {definition.Id} ({args}) por estar fuera del alcance: no proponer rutas fuera del workspace.",
+            kind == "usuario" ? "permiso-denegado" : "fuera-de-alcance",
+            CancellationToken.None);
     }
 
     private static string Truncate(string text, int max) =>

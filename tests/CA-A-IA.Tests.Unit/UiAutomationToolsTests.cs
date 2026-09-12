@@ -1,4 +1,6 @@
 // CA-A-IA — Tests de herramientas de autonomía (parseo, cotas, permisos).
+// UiAutomation es Windows-only por diseño (esta suite solo corre en Windows).
+#pragma warning disable CA1416
 
 using CaAIA.Application.Services;
 using CaAIA.Domain.Enums;

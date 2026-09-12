@@ -216,6 +216,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
     private readonly Application.Services.ISessionContext _sessions;
     private readonly Domain.Persistence.IChatMessageStore _history;
     private readonly Domain.Git.IGitService _git;
+    private readonly Application.Services.LessonStore _lessons;
     private readonly DispatcherQueue _dispatcher;
     private readonly IDisposable _subscription;
     private readonly Diagnostics.UiFlightRecorder _flight; // TEMPORARY-DIAGNOSTIC
@@ -488,6 +489,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         Domain.Events.IEventBus events,
         Domain.Persistence.IChatMessageStore history,
         Domain.Git.IGitService git,
+        Application.Services.LessonStore lessons,
         Diagnostics.UiFlightRecorder flight)
     {
         _coordinator = coordinator;
@@ -497,6 +499,7 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         _sessions = sessions;
         _history = history;
         _git = git;
+        _lessons = lessons;
         _flight = flight;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
 
@@ -943,6 +946,14 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
             var text = Input.Trim();
             AddMessage(new ChatMessage(ChatRole.User, text, DateTimeOffset.Now));
             Input = string.Empty;
+
+            // "recuerda: ..." = lección explícita: se anota y no crea sesión.
+            if (Application.Services.LessonIntake.TryExtract(text, out var lessonScope, out var lessonText))
+            {
+                await RecordLessonBubbleAsync(lessonScope, lessonText, ct).ConfigureAwait(true);
+                return;
+            }
+
             if (!Directory.Exists(WorkspacePath))
             {
                 AddMessage(new ChatMessage(ChatRole.Agent,
@@ -1107,6 +1118,37 @@ public sealed partial class ChatViewModel : ObservableObject, IDisposable
         }
 
         IsAgentPaused = false;
+    }
+
+    /// <summary>
+    /// Guarda una lección explícita del usuario ("recuerda: …") y lo confirma.
+    /// Proyecto = carpeta actual; "recuerda siempre:" = global (todos).
+    /// </summary>
+    private async Task RecordLessonBubbleAsync(
+        Application.Services.LessonScope scope, string lesson, CancellationToken ct)
+    {
+        var where = scope == Application.Services.LessonScope.Global
+            ? null : WorkspacePath;
+        if (scope == Application.Services.LessonScope.Project && !Directory.Exists(WorkspacePath))
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                "Para recordar en este proyecto, elige primero la carpeta.", DateTimeOffset.Now));
+            return;
+        }
+
+        try
+        {
+            await _lessons.RecordLessonAsync(where, scope, lesson, "usuario", ct).ConfigureAwait(true);
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                scope == Application.Services.LessonScope.Global
+                    ? $"Anotado para siempre ✓ Lo aplicaré en todos los proyectos."
+                    : $"Anotado ✓ No lo repetiré en este proyecto.", DateTimeOffset.Now));
+        }
+        catch (Exception ex)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                $"No pude anotarlo: {ex.Message}", DateTimeOffset.Now));
+        }
     }
 
     private void AddMessage(ChatMessage message)

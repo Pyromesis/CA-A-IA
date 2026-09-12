@@ -30,6 +30,7 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
     private readonly Application.Services.IUserPreferences _prefs;
     private readonly Application.Services.ISessionContext _sessions;
     private readonly Domain.Persistence.IChatMessageStore _history;
+    private readonly Application.Services.LessonStore _lessons;
     private readonly DispatcherQueue _dispatcher;
     private readonly IDisposable _subscription;
     private readonly object _runCtsLock = new();
@@ -95,6 +96,7 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
         Application.Services.ISessionContext sessions,
         Domain.Events.IEventBus events,
         Domain.Persistence.IChatMessageStore history,
+        Application.Services.LessonStore lessons,
         Diagnostics.UiFlightRecorder flight)
     {
         _coordinator = coordinator;
@@ -102,12 +104,14 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
         _prefs = prefs;
         _sessions = sessions;
         _history = history;
+        _lessons = lessons;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _subscription = events.SubscribeAll(OnAgentEventAsync);
         _ = Task.Run(PruneOldTempDirs);
         AddMessage(new ChatMessage(ChatRole.System,
             "Pide lo que sea: «abre el navegador y busca…», «organiza mis descargas»… " +
-            "Muevo el ratón y escribo como lo harías tú. Cada pedido usa su propia carpeta temporal.",
+            "Muevo el ratón y escribo como lo harías tú. Cada pedido usa su propia carpeta temporal. " +
+            "Si me equivoco, dime «recuerda: …» y no lo repetiré.",
             DateTimeOffset.Now), persist: false);
     }
 
@@ -143,6 +147,35 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
             var text = Input.Trim();
             AddMessage(new ChatMessage(ChatRole.User, text, DateTimeOffset.Now));
             Input = string.Empty;
+
+            // "recuerda: ..." = lección explícita (proyecto de Carpeta o global).
+            if (Application.Services.LessonIntake.TryExtract(text, out var lessonScope, out var lessonText))
+            {
+                var where = lessonScope == Application.Services.LessonScope.Global
+                    ? null : _prefs.WorkspacePath;
+                if (lessonScope == Application.Services.LessonScope.Project && !Directory.Exists(_prefs.WorkspacePath))
+                {
+                    AddMessage(new ChatMessage(ChatRole.Agent,
+                        "Para recordar en un proyecto, elige primero la carpeta en el Chat.", DateTimeOffset.Now));
+                }
+                else
+                {
+                    try
+                    {
+                        await _lessons.RecordLessonAsync(where, lessonScope, lessonText, "usuario", ct)
+                            .ConfigureAwait(true);
+                        AddMessage(new ChatMessage(ChatRole.Agent,
+                            "Anotado ✓ Lo aplicaré de ahora en adelante.", DateTimeOffset.Now));
+                    }
+                    catch (Exception ex)
+                    {
+                        AddMessage(new ChatMessage(ChatRole.Agent,
+                            $"No pude anotarlo: {ex.Message}", DateTimeOffset.Now));
+                    }
+                }
+
+                return;
+            }
 
             // Si había algo pausado, se descarta limpio antes de lo nuevo.
             if (IsAgentPaused)

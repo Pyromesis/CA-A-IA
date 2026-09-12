@@ -17,6 +17,7 @@ public static class ApplicationServiceExtensions
 
         services.AddSingleton<IUserPreferences, UserPreferences>();
         services.AddSingleton<ISessionContext, SessionContext>();
+        services.AddSingleton<LessonStore>();
         services.AddScoped<SessionUseCase>();
         services.AddScoped<PlanningUseCase>();
         services.AddScoped<ISessionCoordinator, SessionCoordinator>();

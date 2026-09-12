@@ -28,6 +28,7 @@ public sealed class AgentEngineFactory : IAgentEngineFactory
     private readonly IRepairPolicy _repair;
     private readonly IOptions<CaAIAOptions> _options;
     private readonly ILogger<AgentExecutionEngine> _engineLog;
+    private readonly LessonStore? _lessons;
 
     public AgentEngineFactory(
         IAgentSessionStore sessions,
@@ -38,7 +39,8 @@ public sealed class AgentEngineFactory : IAgentEngineFactory
         IPlanVerifier verifier,
         IRepairPolicy repair,
         IOptions<CaAIAOptions> options,
-        ILogger<AgentExecutionEngine> engineLog)
+        ILogger<AgentExecutionEngine> engineLog,
+        LessonStore? lessons = null)
     {
         _sessions = sessions;
         _plans = plans;
@@ -49,11 +51,13 @@ public sealed class AgentEngineFactory : IAgentEngineFactory
         _repair = repair;
         _options = options;
         _engineLog = engineLog;
+        _lessons = lessons;
     }
 
     public IAgentExecutionEngine GetOrCreate(Guid sessionId) =>
         _engines.GetOrAdd(sessionId, id => new AgentExecutionEngine(
-            id, _sessions, _plans, _checkpoints, _events, _executor, _verifier, _repair, _options, _engineLog));
+            id, _sessions, _plans, _checkpoints, _events, _executor, _verifier, _repair,
+            _options, _engineLog, lessons: _lessons));
 
     public IAgentExecutionEngine Recreate(Guid sessionId)
     {
@@ -63,8 +67,9 @@ public sealed class AgentEngineFactory : IAgentEngineFactory
         }
 
         var fresh = new AgentExecutionEngine(
-            sessionId, _sessions, _plans, _checkpoints, _events, _executor, _verifier, _repair, _options, _engineLog,
-            global::CaAIA.Domain.Enums.AgentState.Paused);
+            sessionId, _sessions, _plans, _checkpoints, _events, _executor, _verifier, _repair,
+            _options, _engineLog,
+            global::CaAIA.Domain.Enums.AgentState.Paused, lessons: _lessons);
         _engines[sessionId] = fresh;
         return fresh;
     }

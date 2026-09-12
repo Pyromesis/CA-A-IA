@@ -4,6 +4,7 @@
 using CaAIA.Agent.StateMachine;
 using CaAIA.Agent.Verification;
 using CaAIA.Application.Configuration;
+using CaAIA.Application.Services;
 using CaAIA.Domain.Correlation;
 using CaAIA.Domain.Enums;
 using CaAIA.Domain.Events;
@@ -34,6 +35,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
     private readonly ExecutionSettings _settings;
     private readonly ILogger<AgentExecutionEngine> _log;
     private readonly CorrelationContext _correlation;
+    private readonly Application.Services.LessonStore? _lessons;
 
     private readonly AgentStateMachine _machine;
     private readonly CancellationTokenSource _internalCts = new();
@@ -60,7 +62,8 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
         IRepairPolicy repair,
         IOptions<CaAIAOptions> options,
         ILogger<AgentExecutionEngine> log,
-        AgentState initialState = AgentState.Idle)
+        AgentState initialState = AgentState.Idle,
+        Application.Services.LessonStore? lessons = null)
     {
         _sessionId = sessionId;
         _sessions = sessions;
@@ -72,6 +75,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
         _repair = repair;
         _settings = options.Value.Execution;
         _log = log;
+        _lessons = lessons;
         _correlation = CorrelationContext.Create(sessionId, ExecutionId);
         _machine = new AgentStateMachine(initialState);
         _machine.Transitioned += (_, t) =>
@@ -456,6 +460,7 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
             if (!_repair.ShouldRepair(outcome.Category, task.Attempts, task.MaxAttempts))
             {
                 _log.LogWarning("Task '{Title}' not repairable ({Category}); advancing", task.Title, outcome.Category);
+                await LearnTerminalFailureAsync(plan, task, outcome, ct).ConfigureAwait(false);
                 await GoTaskAsync(AgentState.AdvancingTask, "task failed, not repairable", ct).ConfigureAwait(false);
                 return;
             }
@@ -628,6 +633,46 @@ public sealed class AgentExecutionEngine : IAgentExecutionEngine, IAsyncDisposab
         await _plans.SaveAsync(plan, ct).ConfigureAwait(false);
         // Vuelta al avance (AdvancingTask→Executing por tarea): evita la autotransición Executing→Executing.
         await Go(AgentState.AdvancingTask, $"{gaps.Count} audit gaps to address (round {_auditRounds})", ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Aprende del fracaso terminal (tras agotar reparación): lo que falló así
+    /// no se reintenta igual. Se omiten entorno/red/permisos (transitorios o ya
+    /// registrados al denegar). Nunca lanza.
+    /// </summary>
+    private async Task LearnTerminalFailureAsync(
+        Plan plan, AgentTask task, TaskExecutionOutcome outcome, CancellationToken ct)
+    {
+        if (_lessons is null)
+        {
+            return;
+        }
+
+        if (outcome.Category is FailureCategory.EnvironmentFailure
+            or FailureCategory.NetworkFailure or FailureCategory.PermissionFailure)
+        {
+            return;
+        }
+
+        try
+        {
+            var session = await _sessions.LoadAsync(plan.SessionId, CancellationToken.None)
+                .ConfigureAwait(false);
+            var error = (outcome.Error ?? "sin detalle").Trim();
+            if (error.Length > 200)
+            {
+                error = error[..200].Trim() + "…";
+            }
+
+            await _lessons.RecordLessonAsync(session?.WorkspacePath, LessonScope.Project,
+                $"La tarea '{task.Title}' falló de forma no reparable ({outcome.Category}): {error}. " +
+                "Evitar ese enfoque.",
+                "fallo-tarea", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Terminal lesson not recorded (non-fatal).");
+        }
     }
 
     private async Task FailAsync(Plan plan, string reason, CancellationToken ct)
