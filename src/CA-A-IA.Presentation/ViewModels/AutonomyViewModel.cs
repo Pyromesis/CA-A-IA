@@ -31,6 +31,7 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
     private readonly Application.Services.ISessionContext _sessions;
     private readonly Domain.Persistence.IChatMessageStore _history;
     private readonly Application.Services.LessonStore _lessons;
+    private readonly Domain.AI.IProviderRegistry _providers;
     private readonly DispatcherQueue _dispatcher;
     private readonly IDisposable _subscription;
     private readonly object _runCtsLock = new();
@@ -97,6 +98,7 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
         Domain.Events.IEventBus events,
         Domain.Persistence.IChatMessageStore history,
         Application.Services.LessonStore lessons,
+        Domain.AI.IProviderRegistry providers,
         Diagnostics.UiFlightRecorder flight)
     {
         _coordinator = coordinator;
@@ -105,15 +107,17 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
         _sessions = sessions;
         _history = history;
         _lessons = lessons;
+        _providers = providers;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _subscription = events.SubscribeAll(OnAgentEventAsync);
         _ = Task.Run(PruneOldTempDirs);
+        InitTeam();
         AddMessage(new ChatMessage(ChatRole.System,
             "Pide lo que sea: «abre el navegador y busca…», «organiza mis descargas»… " +
             "Tres trabajan para ti: uno mueve el ratón y escribe, otro mira la pantalla " +
-            "tras cada acción y el modelo lo analiza todo antes de seguir. Usa un modelo " +
-            "rápido y gratuito para volar. Cada pedido usa su propia carpeta temporal. " +
-            "Si me equivoco, dime «recuerda: …» y no lo repetiré.",
+            "tras cada acción y el modelo lo analiza todo antes de seguir. Elige abajo " +
+            "el equipo (hay sugerencias gratis y de pago). Cada pedido usa su propia " +
+            "carpeta temporal. Si me equivoco, dime «recuerda: …» y no lo repetiré.",
             DateTimeOffset.Now), persist: false);
     }
 
@@ -132,6 +136,265 @@ public sealed partial class AutonomyViewModel : ObservableObject, IDisposable
 
             _runCts?.Dispose();
             _runCts = null;
+        }
+
+        try
+        {
+            _actorModelsCts?.Cancel();
+        }
+        catch (Exception)
+        {
+        }
+
+        _actorModelsCts?.Dispose();
+        try
+        {
+            _analystModelsCts?.Cancel();
+        }
+        catch (Exception)
+        {
+        }
+
+        _analystModelsCts?.Dispose();
+    }
+
+    // ---- Equipo: modelo por rol (actor ejecuta, analista verifica con visión,
+    // vigilante automático sin modelo). Escritor único: estos combos.
+
+    public ObservableCollection<ProviderOption> TeamProviders { get; } = new();
+    public ObservableCollection<ModelOption> ActorModels { get; } = new();
+    public ObservableCollection<ModelOption> AnalystModels { get; } = new();
+
+    /// <summary>Sugerencias (rol, etiqueta, proveedor, modelo, esGratis).</summary>
+    public IReadOnlyList<TeamSuggestion> TeamSuggestions { get; } = new[]
+    {
+        new TeamSuggestion("actor", "Actor rápido gratis", "opencode-zen", "big-pickle", true),
+        new TeamSuggestion("actor", "Actor equilibrado", "openrouter", "openai/gpt-4o-mini", false),
+        new TeamSuggestion("analyst", "Analista gratis", "opencode-zen", "big-pickle", true),
+        new TeamSuggestion("analyst", "Analista fino (visión)", "openrouter", "openai/gpt-4o-mini", false),
+    };
+
+    public IReadOnlyList<TeamSuggestion> ActorSuggestions =>
+        TeamSuggestions.Where(s => s.Role == "actor").ToList();
+
+    public IReadOnlyList<TeamSuggestion> AnalystSuggestions =>
+        TeamSuggestions.Where(s => s.Role == "analyst").ToList();
+
+    [ObservableProperty]
+    private ProviderOption? _actorProvider;
+
+    [ObservableProperty]
+    private ModelOption? _actorModel;
+
+    [ObservableProperty]
+    private ProviderOption? _analystProvider;
+
+    [ObservableProperty]
+    private ModelOption? _analystModel;
+
+    private bool _suppressTeamEvents;
+    private CancellationTokenSource? _actorModelsCts;
+    private CancellationTokenSource? _analystModelsCts;
+
+    private void InitTeam()
+    {
+        foreach (var provider in _providers.GetAll().OrderBy(p => p.DisplayName))
+        {
+            TeamProviders.Add(new ProviderOption(provider.Id, provider.DisplayName));
+        }
+
+        _suppressTeamEvents = true;
+        try
+        {
+            ActorProvider = TeamProviders.FirstOrDefault(p => p.Id == _prefs.AutonomyActorProvider);
+            ActorModel = string.IsNullOrWhiteSpace(_prefs.AutonomyActorModel)
+                ? null : new ModelOption(ActorProvider?.Id ?? _prefs.AutonomyActorProvider, _prefs.AutonomyActorModel);
+            if (ActorModel is not null)
+            {
+                ActorModels.Add(ActorModel);
+            }
+
+            AnalystProvider = TeamProviders.FirstOrDefault(p => p.Id == _prefs.AutonomyAnalystProvider);
+            AnalystModel = string.IsNullOrWhiteSpace(_prefs.AutonomyAnalystModel)
+                ? null : new ModelOption(AnalystProvider?.Id ?? _prefs.AutonomyAnalystProvider, _prefs.AutonomyAnalystModel);
+            if (AnalystModel is not null)
+            {
+                AnalystModels.Add(AnalystModel);
+            }
+        }
+        finally
+        {
+            _suppressTeamEvents = false;
+        }
+
+        if (ActorProvider is not null)
+        {
+            _ = LoadTeamModelsAsync("actor", ActorProvider.Id, CancellationToken.None);
+        }
+
+        if (AnalystProvider is not null)
+        {
+            _ = LoadTeamModelsAsync("analyst", AnalystProvider.Id, CancellationToken.None);
+        }
+    }
+
+    partial void OnActorProviderChanged(ProviderOption? value)
+    {
+        if (_suppressTeamEvents || value is null)
+        {
+            return;
+        }
+
+        _prefs.SetAutonomyActor(value.Id, string.Empty);
+        ActorModel = null;
+        _ = LoadTeamModelsAsync("actor", value.Id, CancellationToken.None);
+    }
+
+    partial void OnAnalystProviderChanged(ProviderOption? value)
+    {
+        if (_suppressTeamEvents || value is null)
+        {
+            return;
+        }
+
+        _prefs.SetAutonomyAnalyst(value.Id, string.Empty);
+        AnalystModel = null;
+        _ = LoadTeamModelsAsync("analyst", value.Id, CancellationToken.None);
+    }
+
+    partial void OnActorModelChanged(ModelOption? value)
+    {
+        if (_suppressTeamEvents || value is null || ActorProvider is null)
+        {
+            return;
+        }
+
+        _prefs.SetAutonomyActor(ActorProvider.Id, value.ModelId);
+    }
+
+    partial void OnAnalystModelChanged(ModelOption? value)
+    {
+        if (_suppressTeamEvents || value is null || AnalystProvider is null)
+        {
+            return;
+        }
+
+        _prefs.SetAutonomyAnalyst(AnalystProvider.Id, value.ModelId);
+    }
+
+    /// <summary>Aplica una sugerencia ("actor:proveedor/modelo").</summary>
+    [RelayCommand]
+    private void ApplyTeamSuggestion(string? key)
+    {
+        var suggestion = TeamSuggestions.FirstOrDefault(s => s.Key == key);
+        if (suggestion is null)
+        {
+            return;
+        }
+
+        var provider = TeamProviders.FirstOrDefault(p => p.Id == suggestion.ProviderId);
+        if (provider is null)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                $"Proveedor no disponible: {suggestion.ProviderId}.", DateTimeOffset.Now));
+            return;
+        }
+
+        _suppressTeamEvents = true;
+        try
+        {
+            if (suggestion.Role == "actor")
+            {
+                ActorProvider = provider;
+                _prefs.SetAutonomyActor(provider.Id, suggestion.ModelId);
+                ActorModels.Clear();
+                ActorModel = new ModelOption(provider.Id, suggestion.ModelId);
+                ActorModels.Add(ActorModel);
+            }
+            else
+            {
+                AnalystProvider = provider;
+                _prefs.SetAutonomyAnalyst(provider.Id, suggestion.ModelId);
+                AnalystModels.Clear();
+                AnalystModel = new ModelOption(provider.Id, suggestion.ModelId);
+                AnalystModels.Add(AnalystModel);
+            }
+        }
+        finally
+        {
+            _suppressTeamEvents = false;
+        }
+
+        _ = LoadTeamModelsAsync(suggestion.Role, provider.Id, CancellationToken.None);
+        AddMessage(new ChatMessage(ChatRole.Agent,
+            $"Equipo: {suggestion.Label} ({suggestion.ProviderId}/{suggestion.ModelId}).", DateTimeOffset.Now));
+    }
+
+    private async Task LoadTeamModelsAsync(string role, string providerId, CancellationToken ct)
+    {
+        var isActor = role == "actor";
+        if (isActor)
+        {
+            _actorModelsCts?.Cancel();
+            _actorModelsCts?.Dispose();
+            _actorModelsCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        }
+        else
+        {
+            _analystModelsCts?.Cancel();
+            _analystModelsCts?.Dispose();
+            _analystModelsCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        }
+
+        var loadCt = (isActor ? _actorModelsCts : _analystModelsCts)!.Token;
+        try
+        {
+            var provider = _providers.Get(providerId);
+            var models = await provider.GetModelsAsync(loadCt).ConfigureAwait(true);
+            loadCt.ThrowIfCancellationRequested();
+            var options = models
+                .Select(m => new ModelOption(m.ProviderId, m.Id, m.IsFree, m.SupportedEfforts))
+                .Distinct()
+                .OrderBy(o => o.Display)
+                .Take(300)
+                .ToList();
+            options.Insert(0, new ModelOption(providerId, string.Empty));
+
+            var list = isActor ? ActorModels : AnalystModels;
+            list.Clear();
+            foreach (var option in options)
+            {
+                list.Add(option);
+            }
+
+            // Reengancha la selección guardada si sigue existiendo.
+            _suppressTeamEvents = true;
+            try
+            {
+                var saved = isActor ? _prefs.AutonomyActorModel : _prefs.AutonomyAnalystModel;
+                var keep = list.FirstOrDefault(o => o.ModelId == saved)
+                    ?? (isActor ? ActorModel : AnalystModel);
+                if (isActor)
+                {
+                    ActorModel = keep ?? list.FirstOrDefault();
+                }
+                else
+                {
+                    AnalystModel = keep ?? list.FirstOrDefault();
+                }
+            }
+            finally
+            {
+                _suppressTeamEvents = false;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            AddMessage(new ChatMessage(ChatRole.Agent,
+                $"No pude listar modelos de {providerId}: {ex.Message}", DateTimeOffset.Now));
         }
     }
 

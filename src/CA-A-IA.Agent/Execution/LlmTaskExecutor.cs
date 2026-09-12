@@ -1,6 +1,7 @@
 // CA-A-IA — Ejecutor real de tareas: bucle modelo→herramientas con permisos,
 // confirmación humana, contexto de proyecto y clasificación de fallos (§20).
 
+using System.Text.Json;
 using CaAIA.Application.Configuration;
 using CaAIA.Application.Services;
 using CaAIA.Domain.AI;
@@ -76,26 +77,39 @@ public sealed class LlmTaskExecutor : ITaskExecutor
             return new TaskExecutionOutcome(false, $"Session {plan.SessionId} not found.", FailureCategory.EnvironmentFailure);
         }
 
-        if (string.IsNullOrWhiteSpace(_selection.ModelId))
-        {
-            return new TaskExecutionOutcome(false,
-                "No model selected (choose one in Chat, or set CaAIA:Providers:DefaultModelId).",
-                FailureCategory.EnvironmentFailure);
-        }
-
-        IAIProvider provider;
-        try
-        {
-            provider = _providers.Get(_selection.ProviderId);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return new TaskExecutionOutcome(false, ex.Message, FailureCategory.EnvironmentFailure);
-        }
-
+        // La resolución del proveedor/modelo (actor) ocurre abajo, tras conocer
+        // las herramientas visibles (el modo autonomía puede mandar).
         var scope = BuildScope(session.WorkspacePath);
         var correlation = CorrelationContext.Create(plan.SessionId, Guid.NewGuid(), task.Id);
         var tools = _tools.ListDefinitionsFor(scope.GrantedPermissions);
+        var autonomy = tools.Any(t => t.Kind == ToolKind.UiAutomation);
+
+        // Equipo de Autonomía: el actor ejecuta el bucle (si está configurado,
+        // manda sobre el modelo del Chat).
+        var actor = ResolveActor(tools);
+        IAIProvider provider;
+        try
+        {
+            provider = _providers.Get(actor.ProviderId);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return new TaskExecutionOutcome(false,
+                actor.IsAutonomy
+                    ? $"Autonomy actor '{actor.ProviderId}' not available: {ex.Message}"
+                    : ex.Message,
+                FailureCategory.EnvironmentFailure);
+        }
+
+        var modelId = actor.ModelId;
+        if (string.IsNullOrWhiteSpace(modelId))
+        {
+            return new TaskExecutionOutcome(false,
+                actor.IsAutonomy
+                    ? "Autonomy actor has no model: pick one in the Autonomy tab."
+                    : "No model selected (choose one in Chat, or set CaAIA:Providers:DefaultModelId).",
+                FailureCategory.EnvironmentFailure);
+        }
 
         ProjectContext context;
         try
@@ -126,7 +140,7 @@ public sealed class LlmTaskExecutor : ITaskExecutor
             {
                 response = await provider.CompleteAsync(new AIRequest
                 {
-                    ModelId = _selection.ModelId,
+                    ModelId = modelId,
                     Messages = WithImages(history, carryImages),
                     Tools = tools.ToList(),
                     Temperature = 0.2,
@@ -145,6 +159,14 @@ public sealed class LlmTaskExecutor : ITaskExecutor
             {
                 await RememberAsync(session.Id, task.Id,
                     $"task-result: {task.Title}", Truncate(response.Content, 2000), ct).ConfigureAwait(false);
+                var verdict = await VerifyWithAnalystAsync(
+                    session, task, response.Content, tools, scope, correlation, ct).ConfigureAwait(false);
+                if (!verdict.Ok)
+                {
+                    return new TaskExecutionOutcome(false,
+                        $"Analyst: {verdict.Reason}", FailureCategory.ToolFailure);
+                }
+
                 return new TaskExecutionOutcome(true);
             }
 
@@ -273,6 +295,135 @@ public sealed class LlmTaskExecutor : ITaskExecutor
         return copy;
     }
 
+    /// <summary>
+    /// Analista (rol con visión): verifica con una captura fresca que la tarea
+    /// quedó visiblemente hecha. Solo en autonomía con analista configurado.
+    /// Si el analista falla técnicamente, no bloquea (se da por bueno con log).
+    /// Su "no" sí bloquea: entra al circuito normal de reparación (acotado).
+    /// </summary>
+    private async Task<(bool Ok, string Reason)> VerifyWithAnalystAsync(
+        AgentSession session,
+        AgentTask task,
+        string summary,
+        IReadOnlyCollection<ToolDefinition> tools,
+        ExecutionScope scope,
+        CorrelationContext correlation,
+        CancellationToken ct)
+    {
+        if (!tools.Any(t => t.Kind == ToolKind.UiAutomation))
+        {
+            return (true, string.Empty);
+        }
+
+        var analystProviderId = _selection.AutonomyAnalystProvider;
+        var analystModelId = _selection.AutonomyAnalystModel;
+        if (string.IsNullOrWhiteSpace(analystProviderId) || string.IsNullOrWhiteSpace(analystModelId))
+        {
+            return (true, string.Empty);
+        }
+
+        IAIProvider analyst;
+        try
+        {
+            analyst = _providers.Get(analystProviderId);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            _log.LogWarning(ex, "Autonomy analyst provider '{Provider}' not available; skipping verification.",
+                analystProviderId);
+            return (true, string.Empty);
+        }
+
+        string? shot = null;
+        try
+        {
+            var screenshot = _tools.Get("UiScreenshot");
+            var invocation = new ToolInvocation(Guid.NewGuid(), screenshot.Definition.Id, "{}",
+                correlation, TimeoutOverride: TimeSpan.FromSeconds(20));
+            if (_permissions.Authorize(invocation, screenshot.Definition, scope) is { Allowed: true, RequiresUserConfirmation: false })
+            {
+                var captured = await screenshot.ExecuteAsync(invocation, ct).ConfigureAwait(false);
+                if (captured.Success && captured.AttachmentPath is { } path && File.Exists(path))
+                {
+                    shot = path;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogDebug(ex, "Analyst screenshot failed; skipping verification.");
+        }
+
+        List<AIMessage> messages = new()
+        {
+            new(AIRole.System,
+                "You verify completed UI work. Reply with ONE JSON object only: " +
+                "{\"ok\": true|false, \"reason\": \"...\"}. Say ok=false ONLY if visibly not done."),
+            new(AIRole.User, $"TASK: {task.Title}\n{task.Description}\n\nClaimed result:\n{summary}")
+            {
+                Images = shot is null ? Array.Empty<string>() : new[] { shot },
+            },
+        };
+        AIResponse judged;
+        try
+        {
+            judged = await analyst.CompleteAsync(new AIRequest
+            {
+                ModelId = analystModelId,
+                Messages = messages,
+                Temperature = 0.1,
+                Timeout = TimeSpan.FromSeconds(_options.Providers.RequestTimeoutSeconds),
+                Correlation = correlation,
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is AIProviderException or OperationCanceledException)
+        {
+            // Fallo técnico del analista (incluida cancelación): no bloquea la tarea.
+            _log.LogWarning(ex, "Analyst call failed; accepting task result.");
+            if (ex is OperationCanceledException)
+            {
+                ct.ThrowIfCancellationRequested();
+            }
+
+            return (true, string.Empty);
+        }
+
+        return ParseAnalystVerdict(judged.Content);
+    }
+
+    /// <summary>Veredicto {"ok","reason"} tolerante: sin JSON usable = ok (no bloquear).</summary>
+    internal static (bool Ok, string Reason) ParseAnalystVerdict(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return (true, string.Empty);
+        }
+
+        try
+        {
+            var text = content.Trim();
+            var start = text.IndexOf('{');
+            var end = text.LastIndexOf('}');
+            if (start < 0 || end <= start)
+            {
+                return (true, string.Empty);
+            }
+
+            using var doc = JsonDocument.Parse(text[start..(end + 1)]);
+            var ok = !doc.RootElement.TryGetProperty("ok", out var okEl)
+                || okEl.ValueKind != JsonValueKind.False;
+            var reason = doc.RootElement.TryGetProperty("reason", out var r)
+                && r.ValueKind == JsonValueKind.String
+                ? r.GetString() ?? string.Empty : string.Empty;
+            return ok ? (true, string.Empty) : (false,
+                string.IsNullOrWhiteSpace(reason) ? "analyst not satisfied" : reason.Trim());
+        }
+        catch (JsonException)
+        {
+            return (true, string.Empty);
+        }
+    }
+
     private async Task<ToolResult> InvokeToolAsync(
         AIToolCall call, IReadOnlyCollection<ToolDefinition> visible, ExecutionScope scope,
         CorrelationContext correlation, CancellationToken ct)
@@ -360,6 +511,23 @@ public sealed class LlmTaskExecutor : ITaskExecutor
             _options.Security.DeniedPaths,
             _selection.AuthorizationLevel,
             _options.Security.AllowPackageInstall);
+
+    /// <summary>
+    /// Actor del bucle: en autonomía, el modelo configurado para el rol manda
+    /// sobre el del Chat (si está vacío, se usa el del Chat).
+    /// </summary>
+    private (string ProviderId, string ModelId, bool IsAutonomy) ResolveActor(
+        IReadOnlyCollection<ToolDefinition> tools)
+    {
+        if (tools.Any(t => t.Kind == ToolKind.UiAutomation)
+            && !string.IsNullOrWhiteSpace(_selection.AutonomyActorModel)
+            && !string.IsNullOrWhiteSpace(_selection.AutonomyActorProvider))
+        {
+            return (_selection.AutonomyActorProvider, _selection.AutonomyActorModel, true);
+        }
+
+        return (_selection.ProviderId, _selection.ModelId, false);
+    }
 
     private static FailureCategory MapProviderError(AIErrorKind kind) => kind switch
     {

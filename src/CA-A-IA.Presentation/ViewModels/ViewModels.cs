@@ -198,6 +198,18 @@ public sealed record ProviderOption(string Id, string DisplayName)
     public string Display => string.IsNullOrWhiteSpace(DisplayName) ? Id : $"{DisplayName} ({Id})";
 }
 
+/// <summary>Sugerencia de modelo para un rol del equipo (actor/analista).</summary>
+public sealed record TeamSuggestion(
+    string Role,
+    string Label,
+    string ProviderId,
+    string ModelId,
+    bool IsFree)
+{
+    public string Key => $"{Role}:{ProviderId}/{ModelId}";
+    public string Display => Label + (IsFree ? " · gratis" : string.Empty);
+}
+
 /// <summary>Nivel de esfuerzo de razonamiento (como en OpenCode). Vacío = Default.</summary>
 public sealed record EffortOption(string Display, string Value);
 

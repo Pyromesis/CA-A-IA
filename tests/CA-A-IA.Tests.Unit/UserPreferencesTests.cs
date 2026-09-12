@@ -68,6 +68,27 @@ public sealed class UserPreferencesTests
     }
 
     [Fact]
+    public async Task TeamModels_Roundtrip_ThroughStore()
+    {
+        var store = new MemorySettingsStore();
+        var prefs = Create(store);
+        await prefs.InitializeAsync(CancellationToken.None);
+        Assert.Equal(string.Empty, prefs.AutonomyActorModel);
+        Assert.Equal(string.Empty, prefs.AutonomyAnalystModel);
+
+        prefs.SetAutonomyActor("zen", "flash-free");
+        prefs.SetAutonomyAnalyst("router", "vision-1");
+        await prefs.FlushAsync(CancellationToken.None);
+
+        var reloaded = Create(store);
+        await reloaded.InitializeAsync(CancellationToken.None);
+        Assert.Equal("zen", reloaded.AutonomyActorProvider);
+        Assert.Equal("flash-free", reloaded.AutonomyActorModel);
+        Assert.Equal("router", reloaded.AutonomyAnalystProvider);
+        Assert.Equal("vision-1", reloaded.AutonomyAnalystModel);
+    }
+
+    [Fact]
     public void Workspace_DefaultsToDocuments_WhenPresent()
     {
         var prefs = Create(new MemorySettingsStore());

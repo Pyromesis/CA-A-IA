@@ -13,6 +13,7 @@
           HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -41,8 +42,93 @@
             </Grid>
         </Border>
 
+        <!-- Equipo: modelo por rol (actor ejecuta, analista verifica con visión) -->
+        <Border Grid.Row="1" x:Name="TeamCard" Style="{StaticResource CardPanelStyle}" Padding="14">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="EQUIPO" Style="{StaticResource EyebrowLabelStyle}" FontSize="10" />
+                <Grid Grid.Row="1" ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="🎬 Actor (ejecuta)" FontSize="12" FontWeight="SemiBold" />
+                        <ComboBox Header="Proveedor"
+                                  ItemsSource="{x:Bind ViewModel.TeamProviders, Mode=OneWay}"
+                                  SelectedItem="{x:Bind ViewModel.ActorProvider, Mode=TwoWay}"
+                                  DisplayMemberPath="Display" HorizontalAlignment="Stretch"
+                                  MaxDropDownHeight="300" />
+                        <ComboBox Header="Modelo"
+                                  ItemsSource="{x:Bind ViewModel.ActorModels, Mode=OneWay}"
+                                  SelectedItem="{x:Bind ViewModel.ActorModel, Mode=TwoWay}"
+                                  DisplayMemberPath="Display" HorizontalAlignment="Stretch"
+                                  MaxDropDownHeight="300" />
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.ActorSuggestions, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding Display}"
+                                            Command="{Binding ElementName=TeamCard, Path=DataContext.ApplyTeamSuggestionCommand}"
+                                            CommandParameter="{Binding Key}"
+                                            Style="{StaticResource AppGhostButtonStyle}"
+                                            Padding="8,3" FontSize="11" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="2">
+                        <TextBlock Text="👁️ Analista (verifica)" FontSize="12" FontWeight="SemiBold" />
+                        <ComboBox Header="Proveedor"
+                                  ItemsSource="{x:Bind ViewModel.TeamProviders, Mode=OneWay}"
+                                  SelectedItem="{x:Bind ViewModel.AnalystProvider, Mode=TwoWay}"
+                                  DisplayMemberPath="Display" HorizontalAlignment="Stretch"
+                                  MaxDropDownHeight="300" />
+                        <ComboBox Header="Modelo (con visión)"
+                                  ItemsSource="{x:Bind ViewModel.AnalystModels, Mode=OneWay}"
+                                  SelectedItem="{x:Bind ViewModel.AnalystModel, Mode=TwoWay}"
+                                  DisplayMemberPath="Display" HorizontalAlignment="Stretch"
+                                  MaxDropDownHeight="300" />
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.AnalystSuggestions, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding Display}"
+                                            Command="{Binding ElementName=TeamCard, Path=DataContext.ApplyTeamSuggestionCommand}"
+                                            CommandParameter="{Binding Key}"
+                                            Style="{StaticResource AppGhostButtonStyle}"
+                                            Padding="8,3" FontSize="11" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Bottom">
+                        <TextBlock Text="📸 Vigilante" FontSize="12" FontWeight="SemiBold" />
+                        <Border Style="{StaticResource StatusPillStyle}" VerticalAlignment="Center">
+                            <TextBlock Text="Automático ✓" FontSize="11" Opacity="0.85" />
+                        </Border>
+                    </StackPanel>
+                </Grid>
+                <TextBlock Grid.Row="2" FontSize="11" Opacity="0.6" TextWrapping="WrapWholeWords"
+                           Text="Vacío = se usa el modelo del Chat. El analista verifica al final de cada tarea (una llamada de visión)." />
+            </Grid>
+        </Border>
+
         <!-- Conversación -->
-        <ListView Grid.Row="1" x:Name="MessagesList"
+        <ListView Grid.Row="2" x:Name="MessagesList"
                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                   ItemsSource="{x:Bind ViewModel.Messages, Mode=OneWay}"
                   ItemTemplateSelector="{StaticResource BubbleSelector}"
@@ -61,7 +147,7 @@
         </ListView>
 
         <!-- Actividad + controles ⏸/▶/⏹ -->
-        <Grid Grid.Row="2" ColumnSpacing="8">
+        <Grid Grid.Row="3" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -108,7 +194,7 @@
         </Grid>
 
         <!-- Composer -->
-        <Border Grid.Row="3" Style="{StaticResource CardPanelStyle}" Padding="8">
+        <Border Grid.Row="4" Style="{StaticResource CardPanelStyle}" Padding="8">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

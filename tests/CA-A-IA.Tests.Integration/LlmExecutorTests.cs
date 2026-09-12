@@ -40,7 +40,8 @@ public sealed class LlmExecutorTests : IDisposable
     }
 
     private sealed record Harness(
-        LlmTaskExecutor Executor, ScriptedLlmProvider Provider, IAgentSessionStore Sessions);
+        LlmTaskExecutor Executor, ScriptedLlmProvider Provider, IAgentSessionStore Sessions,
+        Application.Services.UserPreferences Prefs);
 
     private Harness Create(IUserConfirmation confirmation, bool confirmWrites, IEventBus? events = null,
         Action<ToolRegistry>? extraTools = null)
@@ -93,7 +94,7 @@ public sealed class LlmExecutorTests : IDisposable
             confirmation, new InMemoryMemoryStore(),
             events ?? new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance),
             options, NullLogger<LlmTaskExecutor>.Instance);
-        return new Harness(executor, provider, sessions);
+        return new Harness(executor, provider, sessions, prefs);
     }
 
     private async Task<(Plan Plan, AgentTask Task)> SeedAsync(IAgentSessionStore sessions, string title)
@@ -271,6 +272,77 @@ public sealed class LlmExecutorTests : IDisposable
         public Task<ToolResult> ExecuteAsync(ToolInvocation invocation, CancellationToken ct) =>
             Task.FromResult(new ToolResult(invocation.InvocationId, "UiScreenshot", true,
                 "shot", AttachmentPath: _shot));
+    }
+
+    [Fact]
+    public async Task ActorOverride_MissingProvider_FailsClear()
+    {
+        var h = Create(new AllowConfirmation(), confirmWrites: false,
+            extraTools: tools => tools.Register(
+                new ShotStub(Path.Combine(Path.GetTempPath(), "noshot.png"))));
+        h.Prefs.SetAutonomyActor("ghost-llm", "m9");
+        var (plan, task) = await SeedAsync(h.Sessions, "Do it");
+        h.Provider.Enqueue(_ => new AIResponse("unreachable",
+            Array.Empty<AIToolCall>(), "m", new TokenUsage(1, 1)));
+
+        var outcome = await h.Executor.ExecuteTaskAsync(plan, task, CancellationToken.None);
+        Assert.False(outcome.Success);
+        Assert.Contains("Autonomy actor", outcome.Error);
+        Assert.Equal(0, h.Provider.Seen.Count); // ni se llamó al proveedor
+    }
+
+    [Fact]
+    public async Task AnalystDenies_ReopensFailure()
+    {
+        var shot = Path.Combine(Path.GetTempPath(), $"shot-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(shot, new byte[] { 7, 8, 9 });
+        try
+        {
+            var h = Create(new AllowConfirmation(), confirmWrites: false,
+                extraTools: tools => tools.Register(new ShotStub(shot)));
+            h.Prefs.SetAutonomyAnalyst("fake-llm", "m");
+            var (plan, task) = await SeedAsync(h.Sessions, "Open it");
+            h.Provider.Enqueue(_ => new AIResponse("done",
+                Array.Empty<AIToolCall>(), "m", new TokenUsage(1, 1)));
+            h.Provider.Enqueue(_ => new AIResponse(
+                """{"ok":false,"reason":"pantalla en negro"}""",
+                Array.Empty<AIToolCall>(), "m", new TokenUsage(1, 1)));
+
+            var outcome = await h.Executor.ExecuteTaskAsync(plan, task, CancellationToken.None);
+            Assert.False(outcome.Success);
+            Assert.Contains("Analyst", outcome.Error);
+            Assert.Contains("pantalla en negro", outcome.Error);
+        }
+        finally
+        {
+            File.Delete(shot);
+        }
+    }
+
+    [Fact]
+    public async Task AnalystAccepts_KeepsSuccess()
+    {
+        var shot = Path.Combine(Path.GetTempPath(), $"shot-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(shot, new byte[] { 7, 8, 9 });
+        try
+        {
+            var h = Create(new AllowConfirmation(), confirmWrites: false,
+                extraTools: tools => tools.Register(new ShotStub(shot)));
+            h.Prefs.SetAutonomyAnalyst("fake-llm", "m");
+            var (plan, task) = await SeedAsync(h.Sessions, "Open it");
+            h.Provider.Enqueue(_ => new AIResponse("done",
+                Array.Empty<AIToolCall>(), "m", new TokenUsage(1, 1)));
+            h.Provider.Enqueue(_ => new AIResponse(
+                """{"ok":true,"reason":""}""",
+                Array.Empty<AIToolCall>(), "m", new TokenUsage(1, 1)));
+
+            var outcome = await h.Executor.ExecuteTaskAsync(plan, task, CancellationToken.None);
+            Assert.True(outcome.Success, outcome.Error);
+        }
+        finally
+        {
+            File.Delete(shot);
+        }
     }
 
     [Fact]

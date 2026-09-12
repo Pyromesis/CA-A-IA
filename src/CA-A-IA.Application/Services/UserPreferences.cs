@@ -29,6 +29,14 @@ public interface IUserPreferences
     /// <summary>Filtro "solo gratis" del catálogo de modelos.</summary>
     bool ShowFreeOnly { get; }
     void SetShowFreeOnly(bool showFreeOnly);
+
+    /// <summary>Equipo de Autonomía: modelo actor (ejecuta) y analista (verifica con visión).</summary>
+    string AutonomyActorProvider { get; }
+    string AutonomyActorModel { get; }
+    string AutonomyAnalystProvider { get; }
+    string AutonomyAnalystModel { get; }
+    void SetAutonomyActor(string providerId, string modelId);
+    void SetAutonomyAnalyst(string providerId, string modelId);
     event EventHandler? Changed;
 
     /// <summary>Carga lo persistido (una vez, al arrancar). Sin llamar, valen los defaults.</summary>
@@ -75,6 +83,10 @@ public sealed class UserPreferences : IUserPreferences
     public const string EffortKey = "reasoning.effort";
     public const string AuthLevelKey = "auth.level";
     public const string FreeOnlyKey = "ui.showFreeOnly";
+    public const string ActorProviderKey = "autonomy.actor.provider";
+    public const string ActorModelKey = "autonomy.actor.model";
+    public const string AnalystProviderKey = "autonomy.analyst.provider";
+    public const string AnalystModelKey = "autonomy.analyst.model";
 
     private readonly object _gate = new();
     private readonly object _pendingGate = new();
@@ -84,6 +96,10 @@ public sealed class UserPreferences : IUserPreferences
     private string _providerId;
     private string _modelId;
     private string _effort = string.Empty;
+    private string _actorProvider = string.Empty;
+    private string _actorModel = string.Empty;
+    private string _analystProvider = string.Empty;
+    private string _analystModel = string.Empty;
     private Domain.Security.AuthorizationLevel _authLevel = Domain.Security.AuthorizationLevel.ConfirmChanges;
     private bool _showFreeOnly;
     private bool _initialized;
@@ -131,6 +147,42 @@ public sealed class UserPreferences : IUserPreferences
     }
 
     public bool ShowFreeOnly { get { lock (_gate) { return _showFreeOnly; } } }
+
+    public string AutonomyActorProvider { get { lock (_gate) { return _actorProvider; } } }
+    public string AutonomyActorModel { get { lock (_gate) { return _actorModel; } } }
+    public string AutonomyAnalystProvider { get { lock (_gate) { return _analystProvider; } } }
+    public string AutonomyAnalystModel { get { lock (_gate) { return _analystModel; } } }
+
+    public void SetAutonomyActor(string providerId, string modelId) =>
+        SetPair(ActorProviderKey, ActorModelKey, providerId, modelId,
+            (p, m) => { _actorProvider = p; _actorModel = m; },
+            () => (_actorProvider, _actorModel));
+
+    public void SetAutonomyAnalyst(string providerId, string modelId) =>
+        SetPair(AnalystProviderKey, AnalystModelKey, providerId, modelId,
+            (p, m) => { _analystProvider = p; _analystModel = m; },
+            () => (_analystProvider, _analystModel));
+
+    private void SetPair(string providerKey, string modelKey, string providerId, string modelId,
+        Action<string, string> assign, Func<(string Provider, string Model)> current)
+    {
+        providerId ??= string.Empty;
+        modelId ??= string.Empty;
+        lock (_gate)
+        {
+            var (p, m) = current();
+            if (p == providerId && m == modelId)
+            {
+                return;
+            }
+
+            assign(providerId, modelId);
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        _ = PersistAsync(providerKey, providerId);
+        _ = PersistAsync(modelKey, modelId);
+    }
 
     public void SetShowFreeOnly(bool showFreeOnly)
     {
@@ -226,6 +278,10 @@ public sealed class UserPreferences : IUserPreferences
             var effort = await _store.GetAsync(EffortKey, cancellationToken).ConfigureAwait(false);
             var authLevel = await _store.GetAsync(AuthLevelKey, cancellationToken).ConfigureAwait(false);
             var freeOnly = await _store.GetAsync(FreeOnlyKey, cancellationToken).ConfigureAwait(false);
+            var actorProvider = await _store.GetAsync(ActorProviderKey, cancellationToken).ConfigureAwait(false);
+            var actorModel = await _store.GetAsync(ActorModelKey, cancellationToken).ConfigureAwait(false);
+            var analystProvider = await _store.GetAsync(AnalystProviderKey, cancellationToken).ConfigureAwait(false);
+            var analystModel = await _store.GetAsync(AnalystModelKey, cancellationToken).ConfigureAwait(false);
             var changed = false;
             lock (_gate)
             {
@@ -263,6 +319,30 @@ public sealed class UserPreferences : IUserPreferences
                 if (!string.IsNullOrWhiteSpace(freeOnly))
                 {
                     _showFreeOnly = freeOnly.Trim() == "1";
+                    changed = true;
+                }
+
+                if (actorProvider is not null)
+                {
+                    _actorProvider = actorProvider;
+                    changed = true;
+                }
+
+                if (actorModel is not null)
+                {
+                    _actorModel = actorModel;
+                    changed = true;
+                }
+
+                if (analystProvider is not null)
+                {
+                    _analystProvider = analystProvider;
+                    changed = true;
+                }
+
+                if (analystModel is not null)
+                {
+                    _analystModel = analystModel;
                     changed = true;
                 }
             }
